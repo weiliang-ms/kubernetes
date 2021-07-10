@@ -266,29 +266,217 @@
 
 `wait.Until`调用`Until`函数,`Until`函数调用`JitterUntil`函数
 
+定时器在`f()`函数执行完成后开始运行
+
     func Until(f func(), period time.Duration, stopCh <-chan struct{}) {
     	JitterUntil(f, period, 0.0, true, stopCh)
     }
+
+> 解析定时同步机制原理-3
     
 `JitterUntil`函数实体如下：
 
 - `JitterUntil`周期性（默认为1秒）运行`f`函数。
-- 入参`jitterFactor`如果是正的（默认0.0），则周期在`f`的每一次运行之前被抖动
+- 入参`jitterFactor`如果是正的（默认0.0），定时器在`f()`函数的每一次运行之前被抖动
 - `sliding`: 默认入参为`true`，即定时任务间隔时间（默认1秒）不包含执行`f()`函数所需的时间
- 
-       
-    //
-    // 
-    // If jitterFactor is not positive, the period is unchanged and not jittered.
-    //
-    // .
-    //
-    // Close stopCh to stop. f may not be invoked if stop channel is already
-    // closed. Pass NeverStop to if you don't want it stop.
+
     func JitterUntil(f func(), period time.Duration, jitterFactor float64, sliding bool, stopCh <-chan struct{}) {
     	BackoffUntil(f, NewJitteredBackoffManager(period, jitterFactor, &clock.RealClock{}), sliding, stopCh)
     }
     
- 
+> 解析定时同步机制原理-4
+
+根据`backoff`的定时器来循环触发`f`函数，直到`stopCh`关闭
+
+`BackoffUntil`函数实体如下：
+
+    // BackoffUntil一直循环，周期性的（每秒）运行f()函数，直到stodCh通道关闭
+    func BackoffUntil(f func(), backoff BackoffManager, sliding bool, stopCh <-chan struct{}) {
+    	// 定义计时器
+    	var t clock.Timer
+    	// 开启循环流程
+    	for {
+    	    // step 1
+    	    // 在golang中select没有优先级选择，为了避免额外执行f(),在每次循环开始后会先判断stopCh是否关闭
+    	    // 如果stopCh通道关闭，退出循环（定时任务）
+    		select {
+    		case <-stopCh:
+    			return
+    		default:
+    		}
     
-在 golang 中 select 没有优先级选择，为了避免额外执行 f(),在每次循环开始后会先判断 stopCh chan
+            // 默认sliding被设置为true，该逻辑不会被执行
+    		if !sliding {
+    			t = backoff.Backoff()
+    		}
+    
+            // step 2
+            // 执行f()函数，并捕捉异常
+    		func() {
+    			defer runtime.HandleCrash()
+    			f()
+    		}()
+    
+            // step 3
+            // sliding被设置为true，执行定时器赋值（默认定时器间隔1s）
+    		if sliding {
+    		    // 本质为定时器（带抖动属性）
+    			t = backoff.Backoff()
+    		}
+    
+            // // step 3
+            // 在golang中select没有优先级选择，为了避免额外执行f(),判断stopCh是否关闭
+    		select {
+            // 如果stopCh通道关闭，提前退出循环（无需等待至定时结束进入下一轮for{}再退出）
+    		case <-stopCh:
+    			return
+            // 阻塞至定时结束
+            // time.Timer需要对通道进行释放才能达到定时的效果
+    		case <-t.C():
+    		}
+    	}
+    }
+    
+原理同下：
+
+    package main
+  
+    import (
+    	"fmt"
+    	"k8s.io/apimachinery/pkg/util/runtime"
+    	"time"
+    )
+    
+    func main(){
+    	var t time.Timer
+    	var stopCh <- chan struct{}
+    	for {
+    		select {
+    		case <-stopCh:
+    			return
+    		default:
+    		}
+    
+    		func() {
+    			defer runtime.HandleCrash()
+    			fmt.Println("执行f()函数逻辑...")
+    		}()
+    
+    		t=*time.NewTimer(time.Second)
+    
+    		select {
+    		case <-stopCh:
+    			return
+    		case <-t.C:
+    		}
+    	}
+    	<-stopCh
+    }
+ 
+至此，`Job-controller`开启了定时执行`f()`的流程
+ 
+### 关于worker函数
+
+也就是`Run`函数中引用的`jm.worker`
+
+    func (jm *JobController) Run(workers int, stopCh <-chan struct{}) {
+    	defer utilruntime.HandleCrash()
+    	defer jm.queue.ShutDown()
+    
+    	klog.Infof("Starting job controller")
+    	defer klog.Infof("Shutting down job controller")
+    
+    	if !cache.WaitForNamedCacheSync("job", stopCh, jm.podStoreSynced, jm.jobStoreSynced) {
+    		return
+    	}
+    
+    	for i := 0; i < workers; i++ {
+    		go wait.Until(jm.worker, time.Second, stopCh)
+    	}
+    
+    	<-stopCh
+    }
+
+> `worker()`实体如下
+
+实际调用`jm.processNextWorkItem()`
+
+    func (jm *JobController) worker() {
+        for jm.processNextWorkItem() {
+        }
+    }
+
+> 分析`processNextWorkItem()`-1
+
+[pkg/controller/job/job_controller.go 第384行](../../pkg/controller/job/job_controller.go)
+
+    func (jm *JobController) processNextWorkItem() bool {
+        // 获取job控制器队列
+    	key, quit := jm.queue.Get()
+    	// 判断队列是否被关闭
+    	if quit {
+    		return false
+    	}
+    	// 函数结束前，标记key更新状态完毕
+    	defer jm.queue.Done(key)
+    
+        // 同步
+    	forget, err := jm.syncHandler(key.(string))
+    	if err == nil {
+    		if forget {
+    			jm.queue.Forget(key)
+    		}
+    		return true
+    	}
+    
+    	utilruntime.HandleError(fmt.Errorf("Error syncing job: %v", err))
+    	jm.queue.AddRateLimited(key)
+    
+    	return true
+    }
+    
+> 分析`processNextWorkItem()`-2
+
+关于`jm.queue.Get()`分析
+
+    key, quit := jm.queue.Get()
+    
+- `jm.queue`队列存储的是需要更新的`job`
+- `Get()`是[workqueue](../../staging/src/k8s.io/client-go/util/workqueue/queue.go) 包中`Interface`
+接口的一个方法，其他方法如下：
+    - `Add(item interface{})`
+    - `Len() int`
+    - `Get() (item interface{}, shutdown bool)`
+    - `Done(item interface{})`
+    - `ShutDown()`
+    - `ShuttingDown() bool`
+
+`Get()`对应实现为
+
+    func (q *Type) Get() (item interface{}, shutdown bool) {
+        // 创建同步锁
+    	q.cond.L.Lock()
+    	// 函数执行结束前释放同步锁
+    	defer q.cond.L.Unlock()
+    	// 判读队列状态
+    	for len(q.queue) == 0 && !q.shuttingDown {
+    	    // 如果队列开启，且队列无要处理对象执行Wait()方法
+    		q.cond.Wait()
+    	}
+    	
+    	if len(q.queue) == 0 {
+    		// We must be shutting down.
+    		return nil, true
+    	}
+    
+        // 获取队列第一个元素
+    	item, q.queue = q.queue[0], q.queue[1:]
+    
+        // 获取元素的metrics信息
+    	q.metrics.get(item)
+    
+    	q.processing.insert(item)
+    	q.dirty.delete(item)
+    
+    	return item, false
+    }

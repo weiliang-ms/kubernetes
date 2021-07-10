@@ -91,6 +91,7 @@ type JobController struct {
 	recorder record.EventRecorder
 }
 
+// 初始化job控制器函数
 func NewJobController(podInformer coreinformers.PodInformer, jobInformer batchinformers.JobInformer, kubeClient clientset.Interface) *JobController {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)

@@ -355,6 +355,8 @@ type jitteredBackoffManagerImpl struct {
 
 // NewJitteredBackoffManager returns a BackoffManager that backoffs with given duration plus given jitter. If the jitter
 // is negative, backoff will not be jittered.
+// NewJitteredBackoffManager返回一个BackoffManager对象
+// 该BackoffManager使用给定的持续时间加上给定的抖动进行回退
 func NewJitteredBackoffManager(duration time.Duration, jitter float64, c clock.Clock) BackoffManager {
 	return &jitteredBackoffManagerImpl{
 		clock:        c,
