@@ -8,6 +8,9 @@
 - [控制器]()
     - [job-controller](notes/controller-manager/job-controller.md)
 
+- 参考文献
+    - [source-code-reading-notes](https://blog.tianfeiyu.com/source-code-reading-notes/)
+    
 [announcement]: https://cncf.io/news/announcement/2015/07/new-cloud-native-computing-foundation-drive-alignment-among-container
 [Borg]: https://research.google.com/pubs/pub43438.html
 [CNCF]: https://www.cncf.io/about
