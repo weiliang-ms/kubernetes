@@ -162,8 +162,6 @@
     	return jm
     }
 
-
-
 ### Job控制器Run方法
 
 [job_controller.go 140行](../../pkg/controller/job/job_controller.go)
