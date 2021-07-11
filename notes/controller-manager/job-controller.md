@@ -104,6 +104,66 @@
     	return nil, true, nil
     }
 
+### NewJobController()方法解析
+
+> 源码实体
+
+    // 初始化job控制器函数
+    func NewJobController(podInformer coreinformers.PodInformer, jobInformer batchinformers.JobInformer, kubeClient clientset.Interface) *JobController {
+    	// 创建事件通知器
+    	eventBroadcaster := record.NewBroadcaster()
+    	eventBroadcaster.StartLogging(klog.Infof)
+    	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
+    
+    
+        // 
+    	if kubeClient != nil && kubeClient.CoreV1().RESTClient().GetRateLimiter() != nil {
+    		ratelimiter.RegisterMetricAndTrackRateLimiterUsage("job_controller", kubeClient.CoreV1().RESTClient().GetRateLimiter())
+    	}
+    
+        // 初始化job控制器对象
+    	jm := &JobController{
+    	    // kube客户端对象
+    		kubeClient: kubeClient,
+    		// pod控制器（包含创建、删除、更新Pod）
+    		podControl: controller.RealPodControl{
+    			KubeClient: kubeClient,
+    			Recorder:   eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "job-controller"}),
+    		},
+    		expectations: controller.NewControllerExpectations(),
+    		queue:        workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(DefaultJobBackOff, MaxJobBackOff), "job"),
+    		recorder:     eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "job-controller"}),
+    	}
+        // 配置监听
+    	jobInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+    	    // 
+    		AddFunc: func(obj interface{}) {
+    			jm.enqueueController(obj, true)
+    		},
+    		UpdateFunc: jm.updateJob,
+    		DeleteFunc: func(obj interface{}) {
+    			jm.enqueueController(obj, true)
+    		},
+    	})
+    	jm.jobLister = jobInformer.Lister()
+    	jm.jobStoreSynced = jobInformer.Informer().HasSynced
+    
+    	podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+    		AddFunc:    jm.addPod,
+    		UpdateFunc: jm.updatePod,
+    		DeleteFunc: jm.deletePod,
+    	})
+    	jm.podStore = podInformer.Lister()
+    	jm.podStoreSynced = podInformer.Informer().HasSynced
+    
+    	jm.updateHandler = jm.updateJobStatus
+    	jm.syncHandler = jm.syncJob
+    
+    	return jm
+    }
+
+
+
 ### Job控制器Run方法
 
 [job_controller.go 140行](../../pkg/controller/job/job_controller.go)

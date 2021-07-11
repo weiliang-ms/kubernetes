@@ -96,20 +96,23 @@ func NewJobController(podInformer coreinformers.PodInformer, jobInformer batchin
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
-
+	// todo: 暂时没看懂
 	if kubeClient != nil && kubeClient.CoreV1().RESTClient().GetRateLimiter() != nil {
 		ratelimiter.RegisterMetricAndTrackRateLimiterUsage("job_controller", kubeClient.CoreV1().RESTClient().GetRateLimiter())
 	}
 
 	jm := &JobController{
 		kubeClient: kubeClient,
+		// pod控制器
 		podControl: controller.RealPodControl{
 			KubeClient: kubeClient,
 			Recorder:   eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "job-controller"}),
 		},
+		// todo: 没看懂，应该是存储异常信息的对象
 		expectations: controller.NewControllerExpectations(),
-		queue:        workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(DefaultJobBackOff, MaxJobBackOff), "job"),
-		recorder:     eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "job-controller"}),
+		// 初始化队列
+		queue:    workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(DefaultJobBackOff, MaxJobBackOff), "job"),
+		recorder: eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "job-controller"}),
 	}
 
 	jobInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -389,6 +392,8 @@ func (jm *JobController) processNextWorkItem() bool {
 	}
 	defer jm.queue.Done(key)
 
+	// jm.syncHandler调用的实际为func (jm *JobController) syncJob(key string) (bool, error)
+	// 该赋值在NewJobController()阶段中的：jm.syncHandler = jm.syncJob 完成
 	forget, err := jm.syncHandler(key.(string))
 	if err == nil {
 		if forget {
@@ -442,6 +447,9 @@ func (jm *JobController) syncJob(key string) (bool, error) {
 		klog.V(4).Infof("Finished syncing job %q (%v)", key, time.Since(startTime))
 	}()
 
+	// key格式可能为：namespace/job-name或job-name
+	// 通过key获取Job所在命名空间及job名称
+	// 获取方式，通过截取key中的'/'
 	ns, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return false, err
@@ -449,6 +457,7 @@ func (jm *JobController) syncJob(key string) (bool, error) {
 	if len(ns) == 0 || len(name) == 0 {
 		return false, fmt.Errorf("invalid job key %q: either namespace or name is missing", key)
 	}
+	// 获取job实体，sharedJob类型为*v1.Job,
 	sharedJob, err := jm.jobLister.Jobs(ns).Get(name)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -458,6 +467,7 @@ func (jm *JobController) syncJob(key string) (bool, error) {
 		}
 		return false, err
 	}
+	// 获取sharedJob指针的值
 	job := *sharedJob
 
 	// if job was finished previously, we don't want to redo the termination
