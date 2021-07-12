@@ -137,6 +137,12 @@ type PodControllerRefManager struct {
 // NOTE: Once CanAdopt() is called, it will not be called again by the same
 //       PodControllerRefManager instance. Create a new instance if it makes
 //       sense to check CanAdopt() again (e.g. in a different sync pass).
+
+// NewPodControllerRefManager返回一个PodControllerRefManager，该PodControllerRefManager公开了管理pod的controllerRef的方法。
+// CanAdopt()函数可用于在首次采用之前执行可能代价昂贵的检查(例如来自API服务器的实时GET)。
+// 它只会被调用(最多一次)，如果实际尝试采用。 如果CanAdopt()返回一个非nil错误，那么所有采纳都将失败。
+// 一旦CanAdopt()被调用，它将不会被同一个PodControllerRefManager实例再次调用。
+// 如果再次检查CanAdopt()有意义，则创建一个新实例(例如，在一个不同的同步通道中)。
 func NewPodControllerRefManager(
 	podControl PodControlInterface,
 	controller metav1.Object,
@@ -170,6 +176,8 @@ func NewPodControllerRefManager(
 //
 // If the error is nil, either the reconciliation succeeded, or no
 // reconciliation was necessary. The list of Pods that you now own is returned.
+
+// ClaimPods试图获取pod列表所有权
 func (m *PodControllerRefManager) ClaimPods(pods []*v1.Pod, filters ...func(*v1.Pod) bool) ([]*v1.Pod, error) {
 	var claimed []*v1.Pod
 	var errlist []error
@@ -380,10 +388,12 @@ func (m *ReplicaSetControllerRefManager) ReleaseReplicaSet(replicaSet *apps.Repl
 // and denies adoption attempts if that object has a non-nil DeletionTimestamp.
 func RecheckDeletionTimestamp(getObject func() (metav1.Object, error)) func() error {
 	return func() error {
+		// 从apiserver里获取最新状态
 		obj, err := getObject()
 		if err != nil {
 			return fmt.Errorf("can't recheck DeletionTimestamp: %v", err)
 		}
+		// 如果获取删除的时间戳失败，返回`job已经被删除`异常信息，并返回删除的时间戳
 		if obj.GetDeletionTimestamp() != nil {
 			return fmt.Errorf("%v/%v has just been deleted at %v", obj.GetNamespace(), obj.GetName(), obj.GetDeletionTimestamp())
 		}

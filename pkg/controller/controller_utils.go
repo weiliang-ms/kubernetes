@@ -181,7 +181,9 @@ func (r *ControllerExpectations) DeleteExpectations(controllerKey string) {
 // Add/del counts are established by the controller at sync time, and updated as controllees are observed by the controller
 // manager.
 func (r *ControllerExpectations) SatisfiedExpectations(controllerKey string) bool {
+	// 获取期望值
 	if exp, exists, err := r.GetExpectations(controllerKey); exists {
+		// 判断是否满足期望值
 		if exp.Fulfilled() {
 			klog.V(4).Infof("Controller expectations fulfilled %#v", exp)
 			return true
@@ -200,6 +202,7 @@ func (r *ControllerExpectations) SatisfiedExpectations(controllerKey string) boo
 		//	- In this case it wakes up, creates/deletes controllees, and sets expectations again.
 		// When it has satisfied expectations and no controllees need to be created/destroyed > TTL, the expectations expire.
 		//	- In this case it continues without setting expectations till it needs to create/delete controllees.
+		// 创建新控制器时，它没有期望值。
 		klog.V(4).Infof("Controller %v either never recorded expectations, or the ttl expired.", controllerKey)
 	}
 	// Trigger a sync if we either encountered and error (which shouldn't happen since we're
@@ -281,6 +284,7 @@ func (e *ControlleeExpectations) Add(add, del int64) {
 // Fulfilled returns true if this expectation has been fulfilled.
 func (e *ControlleeExpectations) Fulfilled() bool {
 	// TODO: think about why this line being atomic doesn't matter
+	// 原子导入
 	return atomic.LoadInt64(&e.add) <= 0 && atomic.LoadInt64(&e.del) <= 0
 }
 
