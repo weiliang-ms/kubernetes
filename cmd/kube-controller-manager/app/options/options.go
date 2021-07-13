@@ -95,11 +95,13 @@ type KubeControllerManagerOptions struct {
 
 // NewKubeControllerManagerOptions creates a new KubeControllerManagerOptions with a default config.
 func NewKubeControllerManagerOptions() (*KubeControllerManagerOptions, error) {
+	// 初始化控制器默认配置
 	componentConfig, err := NewDefaultComponentConfig(ports.InsecureKubeControllerManagerPort)
 	if err != nil {
 		return nil, err
 	}
 
+	// 初始化配置
 	s := KubeControllerManagerOptions{
 		Generic:         cmoptions.NewGenericControllerManagerConfigurationOptions(&componentConfig.Generic),
 		KubeCloudShared: cmoptions.NewKubeCloudSharedOptions(&componentConfig.KubeCloudShared),
@@ -179,21 +181,26 @@ func NewKubeControllerManagerOptions() (*KubeControllerManagerOptions, error) {
 		Authorization:  apiserveroptions.NewDelegatingAuthorizationOptions(),
 	}
 
+	// 开启认证、鉴权
 	s.Authentication.RemoteKubeConfigFileOptional = true
 	s.Authorization.RemoteKubeConfigFileOptional = true
+	// 开放/healthz path（无需鉴权）
 	s.Authorization.AlwaysAllowPaths = []string{"/healthz"}
 
 	// Set the PairName but leave certificate directory blank to generate in-memory by default
+	// 设置ca证书（基于内存）
 	s.SecureServing.ServerCert.CertDirectory = ""
 	s.SecureServing.ServerCert.PairName = "kube-controller-manager"
 	s.SecureServing.BindPort = ports.KubeControllerManagerPort
 
+	// 配置GarbageCollectorController的gc策略，不回收events类型
 	gcIgnoredResources := make([]garbagecollectorconfig.GroupResource, 0, len(garbagecollector.DefaultIgnoredResources()))
 	for r := range garbagecollector.DefaultIgnoredResources() {
 		gcIgnoredResources = append(gcIgnoredResources, garbagecollectorconfig.GroupResource{Group: r.Group, Resource: r.Resource})
 	}
 
 	s.GarbageCollectorController.GCIgnoredResources = gcIgnoredResources
+	// 设置选主资源名称（选主时，该控制器资源对象所属命名空间及实例加锁）
 	s.Generic.LeaderElection.ResourceName = "kube-controller-manager"
 	s.Generic.LeaderElection.ResourceNamespace = "kube-system"
 
@@ -405,6 +412,7 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
 		return nil, err
 	}
 
+	// 初始化自签证书
 	if err := s.SecureServing.MaybeDefaultWithSelfSignedCerts("localhost", nil, []net.IP{net.ParseIP("127.0.0.1")}); err != nil {
 		return nil, fmt.Errorf("error creating self-signed certificates: %v", err)
 	}

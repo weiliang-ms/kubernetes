@@ -106,9 +106,12 @@ current state towards the desired state. Examples of controllers that ship with
 Kubernetes today are the replication controller, endpoints controller, namespace
 controller, and serviceaccounts controller.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			// 输出版本
 			verflag.PrintAndExitIfRequested()
+			// 输出可选标识
 			utilflag.PrintFlags(cmd.Flags())
 
+			// 配置kube-controller-manager
 			c, err := s.Config(KnownControllers(), ControllersDisabledByDefault.List())
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)

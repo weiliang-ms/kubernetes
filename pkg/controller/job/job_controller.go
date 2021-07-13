@@ -817,13 +817,19 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 		// in the earlier stages whenever possible.
 		// 对现有pod做排序，优先删除优先级低的
 		//将activePods转换为controller.ActivePods类型，使其具备排序能力
-		// 快速排序
+		// 排序规则：
+		// 1、判断是否绑定了 node：Unassigned < assigned；
+		// 2、判断 pod phase：PodPending < PodUnknown < PodRunning；
+		// 3、判断 pod 状态：Not ready < ready；
+		// 4、若 pod 都为 ready，则按运行时间排序，运行时间最短会被删除：empty time < less time < more time；
+		// 5、根据 pod 重启次数排序：higher restart counts < lower restart counts；
+		// 6、按 pod 创建时间进行排序：Empty creation time pods < newer pods < older pods；
 		sort.Sort(controller.ActivePods(activePods))
 
 		active -= diff
 		wait := sync.WaitGroup{}
 		wait.Add(int(diff))
-		// 并发删除冗余Pod
+		// 并发删除冗余的active Pod
 		for i := int32(0); i < diff; i++ {
 			go func(ix int32) {
 				defer wait.Done()
@@ -843,8 +849,9 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 			}(i)
 		}
 		wait.Wait()
-
+		// 5、若处于 active 状态的 pods 数小于 job 设置的并发数，则需要创建出新的 pod
 	} else if active < parallelism {
+		// 6、首先计算出 diff 数
 		wantActive := int32(0)
 		if job.Spec.Completions == nil {
 			// Job does not specify a number of completions.  Therefore, number active
@@ -871,6 +878,7 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 		if diff == 0 {
 			return active, nil
 		}
+
 		jm.expectations.ExpectCreations(jobKey, int(diff))
 		errCh = make(chan error, diff)
 		klog.V(4).Infof("Too few pods running job %q, need %d, creating %d", jobKey, wantActive, diff)
@@ -878,14 +886,11 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 		active += diff
 		wait := sync.WaitGroup{}
 
-		// Batch the pod creates. Batch sizes start at SlowStartInitialBatchSize
-		// and double with each successful iteration in a kind of "slow start".
-		// This handles attempts to start large numbers of pods that would
-		// likely all fail with the same error. For example a project with a
-		// low quota that attempts to create a large number of pods will be
-		// prevented from spamming the API service with the pod create requests
-		// after one of its pods fails.  Conveniently, this also prevents the
-		// event spam that those failures would generate.
+		/*
+		  当前尝试启动大量的pod，出现失败与错误时，有可能原因一致。
+		  例如，一个配额很低的项目，如果试图创建大量的pod，那么在其中一个pod失败后，就不会向API服务发送pod创建请求。
+		*/
+		// 7、批量创建 pod，呈指数级增长
 		for batchSize := int32(integer.IntMin(int(diff), controller.SlowStartInitialBatchSize)); diff > 0; batchSize = integer.Int32Min(2*batchSize, diff) {
 			errorCount := len(errCh)
 			wait.Add(int(batchSize))
@@ -893,6 +898,7 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 				go func() {
 					defer wait.Done()
 					err := jm.podControl.CreatePodsWithControllerRef(job.Namespace, &job.Spec.Template, job, metav1.NewControllerRef(job, controllerKind))
+					// 失败原因为'命名空间处于Terminating终止状态：' -> 返回
 					if err != nil {
 						if errors.HasStatusCause(err, v1.NamespaceTerminatingCause) {
 							// If the namespace is being torn down, we can safely ignore
@@ -900,6 +906,7 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 							return
 						}
 					}
+
 					if err != nil {
 						defer utilruntime.HandleError(err)
 						// Decrement the expected number of creates because the informer won't observe this pod
@@ -914,12 +921,14 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 			}
 			wait.Wait()
 			// any skipped pods that we never attempted to start shouldn't be expected.
+			// 9、若有创建失败的操作记录在 expectations 中
 			skippedPods := diff - batchSize
 			if errorCount < len(errCh) && skippedPods > 0 {
 				klog.V(2).Infof("Slow-start failure. Skipping creation of %d pods, decrementing expectations for job %q/%q", skippedPods, job.Namespace, job.Name)
 				active -= skippedPods
 				for i := int32(0); i < skippedPods; i++ {
 					// Decrement the expected number of creates because the informer won't observe this pod
+					// 给定控制器的期望计数 -1
 					jm.expectations.CreationObserved(jobKey)
 				}
 				// The skipped pods will be retried later. The next controller resync will
