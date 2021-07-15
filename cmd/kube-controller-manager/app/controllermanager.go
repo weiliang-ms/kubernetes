@@ -112,6 +112,10 @@ controller, and serviceaccounts controller.`,
 			utilflag.PrintFlags(cmd.Flags())
 
 			// 配置kube-controller-manager
+			/*
+				// 返回控制器名称列表，并排序
+				KnownControllers() -> []string{"etcd","namespace",...}
+			*/
 			c, err := s.Config(KnownControllers(), ControllersDisabledByDefault.List())
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
