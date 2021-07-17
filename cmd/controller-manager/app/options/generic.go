@@ -52,16 +52,24 @@ func (o *GenericControllerManagerConfigurationOptions) AddFlags(fss *cliflag.Nam
 
 	o.Debugging.AddFlags(fss.FlagSet("debugging"))
 	genericfs := fss.FlagSet("generic")
+	// --min-resync-period
+	// 重新同步周期,在 [MinResyncPeriod-2 * MinResyncPeriod]间取随机值(default 12h0m0s)
 	genericfs.DurationVar(&o.MinResyncPeriod.Duration, "min-resync-period", o.MinResyncPeriod.Duration, "The resync period in reflectors will be random between MinResyncPeriod and 2*MinResyncPeriod.")
+	// 发送到kube-apiserver请求的ContentType类型（default “application/vnd.kubernetes.protobuf”）
 	genericfs.StringVar(&o.ClientConnection.ContentType, "kube-api-content-type", o.ClientConnection.ContentType, "Content type of requests sent to apiserver.")
+	// 与kube-apiserver通信的qps（default 20）
 	genericfs.Float32Var(&o.ClientConnection.QPS, "kube-api-qps", o.ClientConnection.QPS, "QPS to use while talking with kubernetes apiserver.")
+	// 发送到kube-apiserver每秒请求量（default 30）
 	genericfs.Int32Var(&o.ClientConnection.Burst, "kube-api-burst", o.ClientConnection.Burst, "Burst to use while talking with kubernetes apiserver.")
+	// 启动controller manager的间隔时间
 	genericfs.DurationVar(&o.ControllerStartInterval.Duration, "controller-start-interval", o.ControllerStartInterval.Duration, "Interval between starting controller managers.")
+	// 需要开启的controller列表，*代表开启所有（默认），‘foo’代表开启foo controller，‘-foo’代表禁止foo controller。
 	genericfs.StringSliceVar(&o.Controllers, "controllers", o.Controllers, fmt.Sprintf(""+
 		"A list of controllers to enable. '*' enables all on-by-default controllers, 'foo' enables the controller "+
 		"named 'foo', '-foo' disables the controller named 'foo'.\nAll controllers: %s\nDisabled-by-default controllers: %s",
 		strings.Join(allControllers, ", "), strings.Join(disabledByDefaultControllers, ", ")))
 
+	// 绑定选主参数
 	leaderelectionconfig.BindFlags(&o.LeaderElection, genericfs)
 }
 

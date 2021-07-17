@@ -15,7 +15,15 @@ func (s sortableSliceOfString) Len() int           { return len(s) }
 func (s sortableSliceOfString) Less(i, j int) bool { return lessString(s[i], s[j]) }
 func (s sortableSliceOfString) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
+type ddd struct {
+	Open bool
+}
+
 func main() {
+
+	d := &ddd{}
+	fmt.Println(d.Open)
+
 	initController()
 }
 

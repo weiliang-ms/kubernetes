@@ -121,7 +121,8 @@ controller, and serviceaccounts controller.`,
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 				os.Exit(1)
 			}
-
+			// c.Complete() -> api-server对控制器服务认证授权
+			// 执行控制器启动流程
 			if err := Run(c.Complete(), wait.NeverStop); err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 				os.Exit(1)
@@ -129,6 +130,7 @@ controller, and serviceaccounts controller.`,
 		},
 	}
 
+	// 获取标识集合
 	fs := cmd.Flags()
 	namedFlagSets := s.Flags(KnownControllers(), ControllersDisabledByDefault.List())
 	verflag.AddFlags(namedFlagSets.FlagSet("global"))
@@ -139,11 +141,14 @@ controller, and serviceaccounts controller.`,
 	}
 	usageFmt := "Usage:\n  %s\n"
 	cols, _, _ := term.TerminalSize(cmd.OutOrStdout())
+
 	cmd.SetUsageFunc(func(cmd *cobra.Command) error {
 		fmt.Fprintf(cmd.OutOrStderr(), usageFmt, cmd.UseLine())
 		cliflag.PrintSections(cmd.OutOrStderr(), namedFlagSets, cols)
 		return nil
 	})
+
+	// 设置帮助指令
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n"+usageFmt, cmd.Long, cmd.UseLine())
 		cliflag.PrintSections(cmd.OutOrStdout(), namedFlagSets, cols)
@@ -163,6 +168,7 @@ func ResyncPeriod(c *config.CompletedConfig) func() time.Duration {
 }
 
 // Run runs the KubeControllerManagerOptions.  This should never exit.
+// 运行`KubeControllerManagerOptions`，永不退出
 func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 	// To help debugging, immediately log version
 	klog.Infof("Version: %+v", version.Get())
@@ -176,6 +182,8 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 	// Setup any healthz checks we will want to use.
 	var checks []healthz.HealthChecker
 	var electionChecker *leaderelection.HealthzAdaptor
+	// 判断是否需要选主
+	// --leader-elect
 	if c.ComponentConfig.Generic.LeaderElection.LeaderElect {
 		electionChecker = leaderelection.NewLeaderHealthzAdaptor(time.Second * 20)
 		checks = append(checks, electionChecker)
@@ -183,6 +191,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 
 	// Start the controller manager HTTP server
 	// unsecuredMux is the handler for these controller *after* authn/authz filters have been applied
+	// 启动服务监听
 	var unsecuredMux *mux.PathRecorderMux
 	if c.SecureServing != nil {
 		unsecuredMux = genericcontrollermanager.NewBaseHandler(&c.ComponentConfig.Generic.Debugging, checks...)
@@ -201,22 +210,31 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 		}
 	}
 
+	// 定义run函数
 	run := func(ctx context.Context) {
+		// 初始化客户端（具有不同用户代理的固定客户端）
+		// todo: ???没看明白这个客户端
 		rootClientBuilder := controller.SimpleControllerClientBuilder{
 			ClientConfig: c.Kubeconfig,
 		}
 		var clientBuilder controller.ControllerClientBuilder
+		// 判断--use-service-account-credentials入参
+		// 如果为true，为每个控制器使用单独的service account证书
 		if c.ComponentConfig.KubeCloudShared.UseServiceAccountCredentials {
+			// --service-account-private-key-file
 			if len(c.ComponentConfig.SAController.ServiceAccountKeyFile) == 0 {
 				// It's possible another controller process is creating the tokens for us.
 				// If one isn't, we'll timeout and exit when our client builder is unable to create the tokens.
 				klog.Warningf("--use-service-account-credentials was specified without providing a --service-account-private-key-file")
 			}
 
+			//
 			if shouldTurnOnDynamicClient(c.Client) {
 				klog.V(1).Infof("using dynamic client builder")
 				//Dynamic builder will use TokenRequest feature and refresh service account token periodically
+				// 动态生成器将使用TokenRequest特性并定期刷新服务帐户令牌
 				clientBuilder = controller.NewDynamicClientBuilder(
+					// 深拷贝集群连接配置
 					restclient.AnonymousClientConfig(c.Kubeconfig),
 					c.Client.CoreV1(),
 					"kube-system")
@@ -249,6 +267,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 		select {}
 	}
 
+	// 不选主情况逻辑：
 	if !c.ComponentConfig.Generic.LeaderElection.LeaderElect {
 		run(context.TODO())
 		panic("unreachable")
@@ -611,6 +630,11 @@ func readCA(file string) ([]byte, error) {
 }
 
 func shouldTurnOnDynamicClient(client clientset.Interface) bool {
+	/*
+		判断特性列表是否含有：TokenRequest（beta: v1.12）
+		"k8s.io/component-base/featuregate/feature_gate.go"
+		// todo://特性列表如何默认赋值的？
+	*/
 	if !utilfeature.DefaultFeatureGate.Enabled(features.TokenRequest) {
 		return false
 	}

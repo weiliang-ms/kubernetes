@@ -408,6 +408,7 @@ func (s *KubeControllerManagerOptions) Validate(allControllers []string, disable
 
 // Config return a controller manager config objective
 func (s KubeControllerManagerOptions) Config(allControllers []string, disabledByDefaultControllers []string) (*kubecontrollerconfig.Config, error) {
+	// 检测控制器配置项是否合法
 	if err := s.Validate(allControllers, disabledByDefaultControllers); err != nil {
 		return nil, err
 	}
@@ -417,11 +418,38 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
 		return nil, fmt.Errorf("error creating self-signed certificates: %v", err)
 	}
 
+	// s.Master 为 --master参数值
+	// s.Kubeconfig 为 --kubeconfig参数值,表示.kube/config文件路径
+	// 根据--master与--kubeconfig入参初始化配置，如果入参为空，读取集群内配置（tokenFile，rootCAFile，apiserver服务地址）
+	/*
+		// kubeconfig配置格式如下
+		apiVersion: v1
+		clusters:
+		- cluster:
+		    certificate-authority-data:
+		    server: https://192.168.235.128:6443
+		  name: kubernetes
+		contexts:
+		- context:
+		    cluster: kubernetes
+		    user: system:kube-controller-manager
+		  name: default
+		current-context: default
+		kind: Config
+		preferences: {}
+		users:
+		- name: system:kube-controller-manager
+		  user:
+		    client-certificate-data:
+		    client-key-data:
+	*/
 	kubeconfig, err := clientcmd.BuildConfigFromFlags(s.Master, s.Kubeconfig)
 	if err != nil {
 		return nil, err
 	}
+	// 关闭压缩
 	kubeconfig.DisableCompression = true
+	//
 	kubeconfig.ContentConfig.AcceptContentTypes = s.Generic.ClientConnection.AcceptContentTypes
 	kubeconfig.ContentConfig.ContentType = s.Generic.ClientConnection.ContentType
 	kubeconfig.QPS = s.Generic.ClientConnection.QPS
