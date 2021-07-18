@@ -130,9 +130,11 @@ controller, and serviceaccounts controller.`,
 		},
 	}
 
-	// 获取标识集合
+	// 获取flags集合
 	fs := cmd.Flags()
+	//
 	namedFlagSets := s.Flags(KnownControllers(), ControllersDisabledByDefault.List())
+
 	verflag.AddFlags(namedFlagSets.FlagSet("global"))
 	globalflag.AddGlobalFlags(namedFlagSets.FlagSet("global"), cmd.Name())
 	registerLegacyGlobalFlags(namedFlagSets)
@@ -160,6 +162,10 @@ controller, and serviceaccounts controller.`,
 // ResyncPeriod returns a function which generates a duration each time it is
 // invoked; this is so that multiple controllers don't get into lock-step and all
 // hammer the apiserver with list requests simultaneously.
+/*
+	ResyncPeriod返回一个函数，该函数在每次被调用时生成一个持续时间；
+     这样，多个控制器就不会进入锁定步骤，所有控制器都会同时向apiserver发出列表请求。
+*/
 func ResyncPeriod(c *config.CompletedConfig) func() time.Duration {
 	return func() time.Duration {
 		factor := rand.Float64() + 1
@@ -212,13 +218,12 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 
 	// 定义run函数
 	run := func(ctx context.Context) {
-		// 初始化客户端（具有不同用户代理的固定客户端）
-		// todo: ???没看明白这个客户端
+		// 初始化基础客户端
 		rootClientBuilder := controller.SimpleControllerClientBuilder{
 			ClientConfig: c.Kubeconfig,
 		}
 		var clientBuilder controller.ControllerClientBuilder
-		// 判断--use-service-account-credentials入参
+		// 判断--use-service-account-credentials入参（默认false）
 		// 如果为true，为每个控制器使用单独的service account证书
 		if c.ComponentConfig.KubeCloudShared.UseServiceAccountCredentials {
 			// --service-account-private-key-file
@@ -232,7 +237,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 			if shouldTurnOnDynamicClient(c.Client) {
 				klog.V(1).Infof("using dynamic client builder")
 				//Dynamic builder will use TokenRequest feature and refresh service account token periodically
-				// 动态生成器将使用TokenRequest特性并定期刷新服务帐户令牌
+				// NewDynamicClientBuilder将使用TokenRequest特性并定期刷新服务帐户令牌
 				clientBuilder = controller.NewDynamicClientBuilder(
 					// 深拷贝集群连接配置
 					restclient.AnonymousClientConfig(c.Kubeconfig),
@@ -250,6 +255,8 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 		} else {
 			clientBuilder = rootClientBuilder
 		}
+		// CreateControllerContext创建一个上下文结构体，其中包含对控制器所需资源的引用，比如云提供商和clientBuilder。
+		// rootClientBuilder仅用于共享通知者客户端和令牌控制器。
 		controllerContext, err := CreateControllerContext(c, rootClientBuilder, clientBuilder, ctx.Done())
 		if err != nil {
 			klog.Fatalf("error building controller context: %v", err)
@@ -273,12 +280,14 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 		panic("unreachable")
 	}
 
+	// 获取hostname
 	id, err := os.Hostname()
 	if err != nil {
 		return err
 	}
 
 	// add a uniquifier so that two processes on the same host don't accidentally both become active
+	// 添加一个全局唯一标识，以便同一主机上的两个进程不会意外地同时处于活动状态
 	id = id + "_" + string(uuid.NewUUID())
 
 	rl, err := resourcelock.New(c.ComponentConfig.Generic.LeaderElection.ResourceLock,
@@ -472,14 +481,24 @@ func GetAvailableResources(clientBuilder controller.ControllerClientBuilder) (ma
 // controllers such as the cloud provider and clientBuilder. rootClientBuilder is only used for
 // the shared-informers client and token controller.
 func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clientBuilder controller.ControllerClientBuilder, stop <-chan struct{}) (ControllerContext, error) {
+	// 初始化一个客户端，名称为shared-informers，客户端包含以下内容：
+	// 具有api-server服务的api接口
 	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
+
+	// 初始化sharedInformers(sharedInformer有两个功能: cache和注册事件监听。)
+	// cache功能主要作用是减少对apiserver的直接访问，事件监听可以帮助构建自己的云原生应用
 	sharedInformers := informers.NewSharedInformerFactory(versionedClient, ResyncPeriod(s)())
 
+	/*
+			创建一个新的元数据客户端，该客户端可以以PartialObjectMetadata对象的形式,
+		检索任何Kubernetes对象（核心、聚合或基于自定义资源）的对象元数据详细信息，或者返回错误
+	*/
 	metadataClient := metadata.NewForConfigOrDie(rootClientBuilder.ConfigOrDie("metadata-informers"))
 	metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, ResyncPeriod(s)())
 
 	// If apiserver is not running we should wait for some time and fail only then. This is particularly
 	// important when we start apiserver and controller manager at the same time.
+	// 等待api-server启动，等待时间十秒
 	if err := genericcontrollermanager.WaitForAPIServer(versionedClient, 10*time.Second); err != nil {
 		return ControllerContext{}, fmt.Errorf("failed to wait for apiserver being healthy: %v", err)
 	}
@@ -631,13 +650,15 @@ func readCA(file string) ([]byte, error) {
 
 func shouldTurnOnDynamicClient(client clientset.Interface) bool {
 	/*
-		判断特性列表是否含有：TokenRequest（beta: v1.12）
-		"k8s.io/component-base/featuregate/feature_gate.go"
+		判断特性列表是否含有：TokenRequest（beta: v1.12）,default=true
 		// todo://特性列表如何默认赋值的？
 	*/
 	if !utilfeature.DefaultFeatureGate.Enabled(features.TokenRequest) {
 		return false
 	}
+	/*
+		判断api-server是否含有接口 authentication.k8s.io/serviceaccounts/token
+	*/
 	apiResourceList, err := client.Discovery().ServerResourcesForGroupVersion(v1.SchemeGroupVersion.String())
 	if err != nil {
 		klog.Warningf("fetch api resource lists failed, use legacy client builder: %v", err)

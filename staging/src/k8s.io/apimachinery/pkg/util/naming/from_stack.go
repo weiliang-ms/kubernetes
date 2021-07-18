@@ -44,6 +44,7 @@ func GetNameFromCallsite(ignoredPackages ...string) string {
 		}
 
 		file = trimPackagePrefix(file)
+		// k8s.io/component-base/featuregate/feature_gate.go:172
 		name = fmt.Sprintf("%s:%d", file, line)
 		break
 	}
@@ -61,6 +62,9 @@ func hasPackage(file string, ignoredPackages []string) bool {
 }
 
 // trimPackagePrefix reduces duplicate values off the front of a package name.
+/*
+	/src/k8s.io/component-base/featuregate/feature_gate.go -> k8s.io/component-base/featuregate/feature_gate.go
+*/
 func trimPackagePrefix(file string) string {
 	if l := strings.LastIndex(file, "/vendor/"); l >= 0 {
 		return file[l+len("/vendor/"):]

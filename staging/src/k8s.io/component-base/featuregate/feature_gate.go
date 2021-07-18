@@ -157,9 +157,11 @@ var internalPackages = []string{"k8s.io/component-base/featuregate/feature_gate.
 func NewFeatureGate() *featureGate {
 	known := map[Feature]FeatureSpec{}
 	for k, v := range defaultFeatures {
+		// known[allAlphaGate] = {Default: false, PreRelease: Alpha}
 		known[k] = v
 	}
 
+	// 原子
 	knownValue := &atomic.Value{}
 	knownValue.Store(known)
 
@@ -291,6 +293,9 @@ func (f *featureGate) Add(features map[Feature]FeatureSpec) error {
 }
 
 // Enabled returns true if the key is enabled.  If the key is not known, this call will panic.
+/*
+	判断--feature-gates中的特性配置，若无该特性配置，返回默认配置
+*/
 func (f *featureGate) Enabled(key Feature) bool {
 	if v, ok := f.enabled.Load().(map[Feature]bool)[key]; ok {
 		return v
@@ -326,6 +331,7 @@ func (f *featureGate) KnownFeatures() []string {
 		if v.PreRelease == GA || v.PreRelease == Deprecated {
 			continue
 		}
+		// known[allAlphaGate] = {Default: false, PreRelease: Alpha}
 		known = append(known, fmt.Sprintf("%s=true|false (%s - default=%t)", k, v.PreRelease, v.Default))
 	}
 	sort.Strings(known)

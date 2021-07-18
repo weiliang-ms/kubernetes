@@ -98,4 +98,71 @@
     	return cmd
     }
 
-### 
+### ClientBuilder
+
+`kube-controller-manager`初始化的三种客户端
+
+- `SimpleControllerClientBuilder`
+- `SAControllerClientBuilder`: 若不指定`--use-service-account-credentials=true`初始化的是这个类型
+- `NewDynamicClientBuilder`: 若指定`--use-service-account-credentials=true`初始化的是这个类型
+
+三者构造属性
+
+> `SimpleControllerClientBuilder`
+
+```shell script
+type SimpleControllerClientBuilder struct {
+    // ClientConfig是用于克隆(使用时会做深拷贝),用作每个控制器客户端访问api-server的基础的基本配置
+    ClientConfig *restclient.Config
+}
+```
+
+> `SAControllerClientBuilder`
+
+```shell script
+type SAControllerClientBuilder struct {
+	// ClientConfig是用于克隆(使用时会做深拷贝),用作每个控制器客户端访问api-server的基础的基本配置
+	ClientConfig *restclient.Config
+
+	// CoreClient用于在需要时提供服务帐户(SA),并监视它们的相关令牌以构造控制器客户端
+	CoreClient v1core.CoreV1Interface
+
+	// AuthenticationClient用于检查API令牌,以确保它们在从它们构建控制器客户端之前是有效的
+	AuthenticationClient v1authentication.AuthenticationV1Interface
+
+	// 存放持控制器服务帐户的命名空间,它必须是普通用户无法检查的高特权命名空间.(默认kube-system)
+	Namespace string
+}
+```
+
+> `NewDynamicClientBuilder`
+
+```shell script
+type DynamicControllerClientBuilder struct {
+	// ClientConfig是用于克隆(使用时会做深拷贝),用作每个控制器客户端访问api-server的基础的基本配置
+	ClientConfig *restclient.Config
+
+	// CoreClient用于在需要时提供服务帐户(SA),并监视它们的相关令牌以构造控制器客户端
+	CoreClient v1core.CoreV1Interface
+
+	// 存放持控制器服务帐户的命名空间,它必须是普通用户无法检查的高特权命名空间.(默认kube-system)
+	Namespace string
+
+	// roundTripperFuncMap是一个缓存,用于存储每个服务帐户对应的roundtripper func
+	roundTripperFuncMap map[string]func(http.RoundTripper) http.RoundTripper
+
+	// tocken有效期
+	expirationSeconds int64
+
+	// leewayPercent定义了在客户端触发令牌循环之前剩余的过期百分比
+	leewayPercent int
+
+	mutex sync.Mutex
+
+	clock clock.Clock
+}
+```
+
+> `NewDynamicClientBuilder`工作流程
+
+

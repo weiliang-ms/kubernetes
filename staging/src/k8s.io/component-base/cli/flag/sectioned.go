@@ -36,6 +36,7 @@ type NamedFlagSets struct {
 // FlagSet returns the flag set with the given name and adds it to the
 // ordered name list if it is not in there yet.
 func (nfs *NamedFlagSets) FlagSet(name string) *pflag.FlagSet {
+	// e.g. -> name: "generic"
 	if nfs.FlagSets == nil {
 		nfs.FlagSets = map[string]*pflag.FlagSet{}
 	}

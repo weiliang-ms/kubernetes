@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"reflect"
 	"sort"
+	"time"
 )
 
 type Empty struct{}
@@ -20,7 +22,8 @@ type ddd struct {
 }
 
 func main() {
-
+	rand.Seed(time.Now().UnixNano())
+	fmt.Println(rand.Float64() + 1)
 	d := &ddd{}
 	fmt.Println(d.Open)
 

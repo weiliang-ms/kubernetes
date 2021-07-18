@@ -223,15 +223,22 @@ func NewDefaultComponentConfig(insecurePort int32) (kubectrlmgrconfig.KubeContro
 // Flags returns flags for a specific APIServer by section name
 func (s *KubeControllerManagerOptions) Flags(allControllers []string, disabledByDefaultControllers []string) cliflag.NamedFlagSets {
 	fss := cliflag.NamedFlagSets{}
+	//
 	s.Generic.AddFlags(&fss, allControllers, disabledByDefaultControllers)
 	s.KubeCloudShared.AddFlags(fss.FlagSet("generic"))
-	s.ServiceController.AddFlags(fss.FlagSet("service controller"))
 
+	// ServiceController参数绑定
+	// --concurrent-service-syncs，允许同时同步的service数量。数字越大=服务管理响应越快，但消耗更多 CPU 和网络资源
+	// 默认1
+	s.ServiceController.AddFlags(fss.FlagSet("service controller"))
+	// https监听参数绑定
 	s.SecureServing.AddFlags(fss.FlagSet("secure serving"))
+	// http监听参数绑定
 	s.InsecureServing.AddUnqualifiedFlags(fss.FlagSet("insecure serving"))
+	// 认证、鉴权参数绑定
 	s.Authentication.AddFlags(fss.FlagSet("authentication"))
 	s.Authorization.AddFlags(fss.FlagSet("authorization"))
-
+	// 其他子控制器参数绑定
 	s.AttachDetachController.AddFlags(fss.FlagSet("attachdetach controller"))
 	s.CSRSigningController.AddFlags(fss.FlagSet("csrsigning controller"))
 	s.DeploymentController.AddFlags(fss.FlagSet("deployment controller"))
@@ -254,9 +261,12 @@ func (s *KubeControllerManagerOptions) Flags(allControllers []string, disabledBy
 	s.SAController.AddFlags(fss.FlagSet("serviceaccount controller"))
 	s.TTLAfterFinishedController.AddFlags(fss.FlagSet("ttl-after-finished controller"))
 
+	// 集群访问信息参数绑定
 	fs := fss.FlagSet("misc")
 	fs.StringVar(&s.Master, "master", s.Master, "The address of the Kubernetes API server (overrides any value in kubeconfig).")
 	fs.StringVar(&s.Kubeconfig, "kubeconfig", s.Kubeconfig, "Path to kubeconfig file with authorization and master location information.")
+
+	// feature-gates特性列表参数绑定
 	utilfeature.DefaultMutableFeatureGate.AddFlag(fss.FlagSet("generic"))
 
 	mfs := fss.FlagSet("metrics")
