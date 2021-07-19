@@ -112,10 +112,6 @@ controller, and serviceaccounts controller.`,
 			utilflag.PrintFlags(cmd.Flags())
 
 			// 配置kube-controller-manager
-			/*
-				// 返回控制器名称列表，并排序
-				KnownControllers() -> []string{"etcd","namespace",...}
-			*/
 			c, err := s.Config(KnownControllers(), ControllersDisabledByDefault.List())
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -179,6 +175,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 	// To help debugging, immediately log version
 	klog.Infof("Version: %+v", version.Get())
 
+	// todo:// 没太看懂
 	if cfgz, err := configz.New(ConfigzName); err == nil {
 		cfgz.Set(c.ComponentConfig)
 	} else {

@@ -44,6 +44,7 @@ import (
 	"k8s.io/kubernetes/pkg/master/ports"
 
 	// add the kubernetes feature gates
+	// 隐式初始化特性列表
 	_ "k8s.io/kubernetes/pkg/features"
 
 	"k8s.io/klog"
@@ -210,8 +211,9 @@ func NewKubeControllerManagerOptions() (*KubeControllerManagerOptions, error) {
 // NewDefaultComponentConfig returns kube-controller manager configuration object.
 func NewDefaultComponentConfig(insecurePort int32) (kubectrlmgrconfig.KubeControllerManagerConfiguration, error) {
 	versioned := kubectrlmgrconfigv1alpha1.KubeControllerManagerConfiguration{}
+	// 隐式赋值
 	kubectrlmgrconfigscheme.Scheme.Default(&versioned)
-
+	// todo:// 没看明白转换的意义
 	internal := kubectrlmgrconfig.KubeControllerManagerConfiguration{}
 	if err := kubectrlmgrconfigscheme.Scheme.Convert(&versioned, &internal, nil); err != nil {
 		return internal, err
@@ -418,7 +420,7 @@ func (s *KubeControllerManagerOptions) Validate(allControllers []string, disable
 
 // Config return a controller manager config objective
 func (s KubeControllerManagerOptions) Config(allControllers []string, disabledByDefaultControllers []string) (*kubecontrollerconfig.Config, error) {
-	// 检测控制器配置项是否合法
+	// 检测控制器配置项是否合法,当前版本仅检测--show-hidden-metrics-for-version参数,参数值应低于当前版本
 	if err := s.Validate(allControllers, disabledByDefaultControllers); err != nil {
 		return nil, err
 	}
@@ -459,12 +461,14 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
 	}
 	// 关闭压缩
 	kubeconfig.DisableCompression = true
-	//
 	kubeconfig.ContentConfig.AcceptContentTypes = s.Generic.ClientConnection.AcceptContentTypes
 	kubeconfig.ContentConfig.ContentType = s.Generic.ClientConnection.ContentType
+	// 默认20 --kube-api-qps参数会覆盖
 	kubeconfig.QPS = s.Generic.ClientConnection.QPS
+	// 默认30 --kube-api-burst=参数会覆盖
 	kubeconfig.Burst = int(s.Generic.ClientConnection.Burst)
 
+	// 创建客户端
 	client, err := clientset.NewForConfig(restclient.AddUserAgent(kubeconfig, KubeControllerManagerUserAgent))
 	if err != nil {
 		return nil, err
@@ -473,20 +477,28 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
 	// shallow copy, do not modify the kubeconfig.Timeout.
 	config := *kubeconfig
 	config.Timeout = s.Generic.LeaderElection.RenewDeadline.Duration
+
+	// 创建用于选主的客户端
 	leaderElectionClient := clientset.NewForConfigOrDie(restclient.AddUserAgent(&config, "leader-election"))
 
+	// 记录event
 	eventRecorder := createRecorder(client, KubeControllerManagerUserAgent)
 
+	// 初始化config对象,包含集群连接配置,访问api-server的客户端,用于选主的客户端
 	c := &kubecontrollerconfig.Config{
 		Client:               client,
 		Kubeconfig:           kubeconfig,
 		EventRecorder:        eventRecorder,
 		LeaderElectionClient: leaderElectionClient,
 	}
+	// 赋值 s KubeControllerManagerOptions -> c *kubecontrollerconfig.Config
 	if err := s.ApplyTo(c); err != nil {
 		return nil, err
 	}
-
+	// 是否开启--show-hidden-metrics-for-version
+	/*
+		显示已过期的指标, 有些指标默认情况下是隐藏的，可通过参数--show-hidden-metrics-for-version=1.n
+	*/
 	if len(s.ShowHiddenMetricsForVersion) > 0 {
 		metrics.SetShowHidden()
 	}

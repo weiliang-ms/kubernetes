@@ -53,7 +53,7 @@ type PersistentVolumeRecyclerConfiguration struct {
 // plugins. From this config, the controller-manager binary will create many instances of
 // volume.VolumeConfig, each containing only the configuration needed for that plugin which
 // are then passed to the appropriate plugin. The ControllerManager binary is the only part
-// of the code which knows what plugins are supported and which flags correspond to each plugin.
+// of the code which knows what plugins are supported and which flags correspo nd to each plugin.
 type VolumeConfiguration struct {
 	// enableHostPathProvisioning enables HostPath PV provisioning when running without a
 	// cloud provider. This allows testing and development of provisioning features. HostPath

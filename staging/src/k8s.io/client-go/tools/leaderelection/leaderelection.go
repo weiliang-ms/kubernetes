@@ -194,6 +194,7 @@ type LeaderElector struct {
 }
 
 // Run starts the leader election loop
+// 开始执行选主
 func (le *LeaderElector) Run(ctx context.Context) {
 	defer func() {
 		runtime.HandleCrash()

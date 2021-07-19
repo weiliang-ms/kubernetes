@@ -25,6 +25,7 @@ import (
 )
 
 // Config is the main context object for the controller manager.
+// 控制器的上下文配置对象
 type Config struct {
 	ComponentConfig kubectrlmgrconfig.KubeControllerManagerConfiguration
 

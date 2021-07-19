@@ -67,8 +67,6 @@ type mux interface {
 	Handle(string, http.Handler)
 }
 
-// New creates a Config object with the given name. Each Config is registered
-// with this package's "/configz" handler.
 func New(name string) (*Config, error) {
 	configsGuard.Lock()
 	defer configsGuard.Unlock()

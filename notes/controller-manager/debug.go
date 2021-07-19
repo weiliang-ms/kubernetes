@@ -2,10 +2,8 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
 	"reflect"
 	"sort"
-	"time"
 )
 
 type Empty struct{}
@@ -17,17 +15,21 @@ func (s sortableSliceOfString) Len() int           { return len(s) }
 func (s sortableSliceOfString) Less(i, j int) bool { return lessString(s[i], s[j]) }
 func (s sortableSliceOfString) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-type ddd struct {
-	Open bool
+func main() {
+
+	//var o * Empty
+	o := &Empty{}
+	fmt.Println(o.Validate())
+	initController()
 }
 
-func main() {
-	rand.Seed(time.Now().UnixNano())
-	fmt.Println(rand.Float64() + 1)
-	d := &ddd{}
-	fmt.Println(d.Open)
+func (o *Empty) Validate() []error {
+	if o == nil {
+		return nil
+	}
 
-	initController()
+	errs := []error{}
+	return errs
 }
 
 func initController() {
