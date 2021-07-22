@@ -213,7 +213,6 @@ func NewDefaultComponentConfig(insecurePort int32) (kubectrlmgrconfig.KubeContro
 	versioned := kubectrlmgrconfigv1alpha1.KubeControllerManagerConfiguration{}
 	// 隐式赋值
 	kubectrlmgrconfigscheme.Scheme.Default(&versioned)
-	// todo:// 没看明白转换的意义
 	internal := kubectrlmgrconfig.KubeControllerManagerConfiguration{}
 	if err := kubectrlmgrconfigscheme.Scheme.Convert(&versioned, &internal, nil); err != nil {
 		return internal, err

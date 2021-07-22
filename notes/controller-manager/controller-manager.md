@@ -73,9 +73,38 @@ if err := command.Execute(); err != nil {
 }
 ```
 
-## 初始化`ControllerManagerCommand`逻辑
+## 调用逻辑分析
 
-### 初始化`kube-controller-manager`默认配置
+> 1.运行`kube-controller-manager`服务
+
+通过指定`flags`启动`kube-controller-manager`服务，例：
+
+```shell script
+--kube-api-qps=40 --kubeconfig=/root/.kube/config --leader-elect=true \
+--node-cidr-mask-size=24 --service-cluster-ip-range=10.68.0.0/16 \
+--use-service-account-credentials=true --v=0 --leader-elect=false \
+--service-account-private-key-file=/etc/kubernetes/ca-key.pem
+```
+
+> 2.解析入参（`flags`），并赋予缺省值
+
+> 3.开启服务监听
+
+开启`kube-controller-manager`服务监听，包含： 
+
+- `http`服务
+- `https`服务
+
+> 4.执行选主流程
+
+> 5.启动子控制器
+
+先启动`SA`控制器
+
+再启动其他控制器
+
+> 6.执行子控制器流程
+
 
 
 

@@ -442,7 +442,13 @@ func startNamespaceController(ctx ControllerContext) (http.Handler, bool, error)
 	// the namespace cleanup controller is very chatty.  It makes lots of discovery calls and then it makes lots of delete calls
 	// the ratelimiter negatively affects its speed.  Deleting 100 total items in a namespace (that's only a few of each resource
 	// including events), takes ~10 seconds by default.
+	/*
+		命名空间清理控制器非常繁忙。它会进行大量的发现调用，然后进行大量的删除调用，速率限制器会对它的速度产生负面影响。
+		默认情况下，删除名称空间中的100个项目(这只是每个资源(包括事件)的一部分)大约需要10秒。
+	*/
+	// 初始化客户端
 	nsKubeconfig := ctx.ClientBuilder.ConfigOrDie("namespace-controller")
+	// 20 + 100
 	nsKubeconfig.QPS *= 20
 	nsKubeconfig.Burst *= 100
 	namespaceKubeClient := clientset.NewForConfigOrDie(nsKubeconfig)
@@ -466,6 +472,8 @@ func startModifiedNamespaceController(ctx ControllerContext, namespaceKubeClient
 		ctx.ComponentConfig.NamespaceController.NamespaceSyncPeriod.Duration,
 		v1.FinalizerKubernetes,
 	)
+	fmt.Println(ctx.ComponentConfig.NamespaceController.ConcurrentNamespaceSyncs)
+	// 5m0s同步一次
 	go namespaceController.Run(int(ctx.ComponentConfig.NamespaceController.ConcurrentNamespaceSyncs), ctx.Stop)
 
 	return nil, true, nil
