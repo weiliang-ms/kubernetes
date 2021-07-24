@@ -488,7 +488,7 @@ func CreateControllerContext(s *config.CompletedConfig, rootClientBuilder, clien
 
 	/*
 			创建一个新的元数据客户端，该客户端可以以PartialObjectMetadata对象的形式,
-		检索任何Kubernetes对象（核心、聚合或基于自定义资源）的对象元数据详细信息，或者返回错误
+		检索任何Kubernetes对象（核心、聚合或CRD类型资源）的对象元数据详细信息，或者返回错误
 	*/
 	metadataClient := metadata.NewForConfigOrDie(rootClientBuilder.ConfigOrDie("metadata-informers"))
 	metadataInformers := metadatainformer.NewSharedInformerFactory(metadataClient, ResyncPeriod(s)())
