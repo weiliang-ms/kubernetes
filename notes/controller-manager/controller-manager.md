@@ -742,6 +742,160 @@ func (f *DeltaFIFO) Pop(process PopProcessFunc) (interface{}, error) {
 因此，`DeltaFIFO`的特点在于，入队列的是（资源的）事件，
 而出队列时是拿到的是最早入队列的资源的所有事件。这样的设计保证了不会因为有某个资源疯狂的制造事件，导致其他资源没有机会被处理。
 
+### `controller`
+
+`DeltaFIFO`是一个非常重要的组件，真正让他发挥价值的，便是`Informer`的`controller`
+
+虽然`Kubernetes`源码中的确用的是`controller`这个词，但是此`controller`并不是`Deployment Controller`这种资源控制器。
+而是一个承上启下的事件控制器（从`API Server`拿到事件，下发给`Informer`进行处理）。
+
+`controller`的职责就两个：
+- 通过`List-Watch`从`Api Server`获得事件、并将该事件推入`DeltaFIFO`中
+- 将`sharedIndexInformer`的`HandleDeltas`方法作为参数，来调用`DeltaFIFO`的`Pop`方法
+
+`controller`的定义非常简单，它的核心就是`Reflector`：
+
+```shell script
+type controller struct {
+	config         Config
+	reflector      *Reflector
+	reflectorMutex sync.RWMutex
+	clock          clock.Clock
+}
+```
+
+`Reflector`的代码比较繁琐但是功能比较简单，就是通过`sharedIndexInformer`里定义的`listerWatcher`进行`List-Watch`，并将获得的事件推入`DeltaFIFO`中。
+
+`controller`启动之后会先将`Reflector`启动，然后在执行`processLoop`，通过一个死循环，不停的将从`DeltaFIFO`读出需要处理的资源事件，
+并交给`sharedIndexInformer`的`HandleDeltas`方法（创建`controller`时赋值给了`config.Process`）
+
+```shell script
+func (c *controller) processLoop() {
+	for {
+		obj, err := c.config.Queue.Pop(PopProcessFunc(c.config.Process))
+		if err != nil {
+			if err == ErrFIFOClosed {
+				return
+			}
+			if c.config.RetryOnError {
+				// This is the safe way to re-enqueue.
+				c.config.Queue.AddIfNotPresent(obj)
+			}
+		}
+	}
+}
+```
+
+如果我们再查看下`sharedIndexInformer`的`HandleDeltas`方法，就会发现整个事件消费流程被打通了：
+
+- [HandleDeltas()](../../staging/src/k8s.io/client-go/tools/cache/shared_informer.go)
+
+```shell script
+func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error {
+	s.blockDeltas.Lock()
+	defer s.blockDeltas.Unlock()
+
+	// from oldest to newest
+	for _, d := range obj.(Deltas) {
+		switch d.Type {
+		case Sync, Replaced, Added, Updated:
+			s.cacheMutationDetector.AddObject(d.Object)
+			if old, exists, err := s.indexer.Get(d.Object); err == nil && exists {
+				if err := s.indexer.Update(d.Object); err != nil {
+					return err
+				}
+
+				isSync := false
+				switch {
+				case d.Type == Sync:
+					// Sync events are only propagated to listeners that requested resync
+					isSync = true
+				case d.Type == Replaced:
+					if accessor, err := meta.Accessor(d.Object); err == nil {
+						if oldAccessor, err := meta.Accessor(old); err == nil {
+							// Replaced events that didn't change resourceVersion are treated as resync events
+							// and only propagated to listeners that requested resync
+							isSync = accessor.GetResourceVersion() == oldAccessor.GetResourceVersion()
+						}
+					}
+				}
+				s.processor.distribute(updateNotification{oldObj: old, newObj: d.Object}, isSync)
+			} else {
+				if err := s.indexer.Add(d.Object); err != nil {
+					return err
+				}
+				s.processor.distribute(addNotification{newObj: d.Object}, false)
+			}
+		case Deleted:
+			if err := s.indexer.Delete(d.Object); err != nil {
+				return err
+			}
+			s.processor.distribute(deleteNotification{oldObj: d.Object}, false)
+		}
+	}
+	return nil
+}
+```
+
+前面我们知道了`processor.distribute`方法可以将事件分发给所有`listener`，而`controller`会使用`Reflector`从`ApiServer`拿到事件，并入队列，
+然后通过`processLoop`从队列中拿出要处理的资源的所有事件，最后通过`sharedIndexInformer`的`HandleDeltas`方法，调用了`processor.distribute`
+
+因此，我们可以将整个事件流向整理为下图:
+
+![](asset/controller-reflector.jpg)
+
+### Indexer
+
+以上，我们将事件从接收到分发，中间所有的逻辑已经梳理了一遍，但是在`sharedIndexInformer`的`HandleDeltas`方法中，
+还有一些逻辑比较令人注意，就是所有的事件都会先对`s.indexer`进行更新，然后在分发。
+
+前面提到`Indexer`是一个线程安全的存储，作为缓存使用，为了减轻资源控制器（`Controller`）查询资源时对`ApiServer`的压力。
+
+当有任何事件更新时，会先刷新`Indexer`里的缓存，然后再将事件分发给资源控制器，资源控制器在需要获得资源详情的时候，
+优先从`Indexer`获得，就可以减少对`APIServer`不必要的查询请求。
+
+`Indexer`存储的具体实现在[thread_safe_store.go](../../staging/src/k8s.io/client-go/tools/cache/thread_safe_store.go) 中，
+数据存储在`threadSafeMap`中：
+
+```shell script
+type threadSafeMap struct {
+	lock  sync.RWMutex
+	items map[string]interface{}
+
+	// indexers maps a name to an IndexFunc
+	indexers Indexers
+	// indices maps a name to an Index
+	indices Indices
+}
+```
+从本质上讲，`threadSafeMap`就是加了一个读写锁的`map`。除此之外，还可以定义索引，索引的实现非常有趣，通过两个字段完成：
+- `Indexers`是一个`map`，定义了若干求索引函数，`key`为`indexName`，`value`为求索引的函数（计算资源的索引值）。
+- `Indices`则保存了索引值和数据`key`的映射关系，`Indices`是一个两层的`map`，第一层的`key`为`indexName`，
+和`Indexers`对应，确定使用什么方法计算索引值，`value`是一个`map`，保存了 `索引值-资源key`的关联关系。
+
+相关逻辑比较简单，可以参考下图：
+
+![](asset/indexers.jpg)
+
+
+### MutationDetector
+
+`sharedIndexInformer`的`HandleDeltas`方法中，除了向`s.indexer`更新的数据之外，
+还向`s.cacheMutationDetector`更新了数据。
+
+在一开始讲到`sharedIndexInformer`启动时还会启动一个`cacheMutationDetector`，来监控`indexer`的缓存。
+
+因为`indexer`缓存的其实是一个指针，多个`Controller`访问`indexer`缓存的资源，其实获得的是同一个资源实例。
+如果有一个`Controller`并不本分，修改了资源的属性，势必会影响到其他`Controller`的正确性。
+
+`MutationDetector`的作用正是定期检查有没有缓存被修改，当`Informer`接收到新事件时，
+`MutationDetector`会保存该资源的指针（和`indexer`一样），以及该资源的深拷贝。
+通过定期检查指针指向的资源和开始存储的深拷贝是否一致，便知道被缓存的资源是否被修改。
+
+不过，具体是否启用监控是受到环境变量`KUBE_CACHE_MUTATION_DETECTOR`影响的，如果不设置该环境变量，`sharedIndexInformer`实例化的是`dummyMutationDetector`，在启动后什么事情也不做。
+
+如果`KUBE_CACHE_MUTATION_DETECTOR`为`true`，则`sharedIndexInformer`实例化的是`defaultCacheMutationDetector`，
+该实例会以`1s`为间隔，定期执行检查缓存，如果发现缓存被修改，则会触发一个失败处理函数，如果该函数没被定义，则会触发一个`panic`。
 
 ## 整体调用逻辑
 
