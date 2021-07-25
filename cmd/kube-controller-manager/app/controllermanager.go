@@ -236,7 +236,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 				//Dynamic builder will use TokenRequest feature and refresh service account token periodically
 				// NewDynamicClientBuilder将使用TokenRequest特性并定期刷新服务帐户令牌
 				clientBuilder = controller.NewDynamicClientBuilder(
-					// 深拷贝集群连接配置
+					// 拷贝集群连接配置
 					restclient.AnonymousClientConfig(c.Kubeconfig),
 					c.Client.CoreV1(),
 					"kube-system")
@@ -260,6 +260,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 		}
 		saTokenControllerInitFunc := serviceAccountTokenControllerStarter{rootClientBuilder: rootClientBuilder}.startServiceAccountTokenController
 
+		// 先启动SA控制器 -> saTokenControllerInitFunc
 		if err := StartControllers(controllerContext, saTokenControllerInitFunc, NewControllerInitializers(controllerContext.LoopMode), unsecuredMux); err != nil {
 			klog.Fatalf("error starting controllers: %v", err)
 		}

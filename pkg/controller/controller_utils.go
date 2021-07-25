@@ -571,6 +571,12 @@ func GetPodFromTemplate(template *v1.PodTemplateSpec, parentObject runtime.Objec
 }
 
 func (r RealPodControl) createPods(nodeName, namespace string, template *v1.PodTemplateSpec, object runtime.Object, controllerRef *metav1.OwnerReference) error {
+	// 根据解析以下内容，根据生成Pod配置清单（以Job类型为例）
+	// 1.labels
+	// 2.Finalizers
+	// 3.Annotations
+	// 4.pod名称前缀:xxx-job （job名称）
+	// 5.Controlled By: Job/xxx-job（pod由谁管理）
 	pod, err := GetPodFromTemplate(template, object, controllerRef)
 	if err != nil {
 		return err
@@ -581,6 +587,7 @@ func (r RealPodControl) createPods(nodeName, namespace string, template *v1.PodT
 	if len(labels.Set(pod.Labels)) == 0 {
 		return fmt.Errorf("unable to create pods, no labels")
 	}
+	// 调用api-server创建新Pod
 	newPod, err := r.KubeClient.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 	if err != nil {
 		// only send an event if the namespace isn't terminating

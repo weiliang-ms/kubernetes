@@ -93,28 +93,52 @@ type JobController struct {
 
 // 初始化job控制器函数
 func NewJobController(podInformer coreinformers.PodInformer, jobInformer batchinformers.JobInformer, kubeClient clientset.Interface) *JobController {
+	// 初始化广播对象
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
-	// todo: 暂时没看懂
+
 	if kubeClient != nil && kubeClient.CoreV1().RESTClient().GetRateLimiter() != nil {
 		ratelimiter.RegisterMetricAndTrackRateLimiterUsage("job_controller", kubeClient.CoreV1().RESTClient().GetRateLimiter())
 	}
 
+	// 初始化job控制器，包含：
+	// - kube连接客户端
+	// - 管理pod的RealPodControl
+	// - 存储job控制器异常信息的*ControllerExpectations类型对象
+	// - 队列：存放需要更新的job
+	// - job-controller事件广播对象
 	jm := &JobController{
 		kubeClient: kubeClient,
 		// pod控制器
+		/*
+			实现了以下接口
+			type PodControlInterface interface {
+				// 创建pod
+				CreatePods(namespace string, template *v1.PodTemplateSpec, object runtime.Object) error
+				// 指定Node节点创建pod
+				CreatePodsOnNode(nodeName, namespace string, template *v1.PodTemplateSpec, object runtime.Object, controllerRef *metav1.OwnerReference) error
+				// 创建控制器托管类型pod（如pod -> Controlled By: Job/pi-job）
+				CreatePodsWithControllerRef(namespace string, template *v1.PodTemplateSpec, object runtime.Object, controllerRef *metav1.OwnerReference) error
+				// 删除pod
+				DeletePod(namespace string, podID string, object runtime.Object) error
+				// 更新pod
+				PatchPod(namespace, name string, data []byte) error
+			}
+		*/
 		podControl: controller.RealPodControl{
 			KubeClient: kubeClient,
 			Recorder:   eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "job-controller"}),
 		},
-		// todo: 没看懂，应该是存储异常信息的对象
+		// 初始化存储job控制器异常信息的对象
 		expectations: controller.NewControllerExpectations(),
 		// 初始化队列
-		queue:    workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(DefaultJobBackOff, MaxJobBackOff), "job"),
+		queue: workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(DefaultJobBackOff, MaxJobBackOff), "job"),
+		// 初始化job-controller事件广播对象
 		recorder: eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "job-controller"}),
 	}
 
+	// 创建job资源Informer事件监控回调方法
 	jobInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			jm.enqueueController(obj, true)
@@ -124,18 +148,32 @@ func NewJobController(podInformer coreinformers.PodInformer, jobInformer batchin
 			jm.enqueueController(obj, true)
 		},
 	})
+
+	// 创建job controller监听对象
 	jm.jobLister = jobInformer.Lister()
 	jm.jobStoreSynced = jobInformer.Informer().HasSynced
 
+	// 创建pod资源Informer事件监控回调方法
 	podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    jm.addPod,
 		UpdateFunc: jm.updatePod,
 		DeleteFunc: jm.deletePod,
 	})
+
 	jm.podStore = podInformer.Lister()
 	jm.podStoreSynced = podInformer.Informer().HasSynced
 
+	/*
+		更新job状态方法，状态包含:
+		Conditions []JobCondition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+		StartTime *metav1.Time `json:"startTime,omitempty" protobuf:"bytes,2,opt,name=startTime"`
+		CompletionTime *metav1.Time `json:"completionTime,omitempty" protobuf:"bytes,3,opt,name=completionTime"`
+		Active int32 `json:"active,omitempty" protobuf:"varint,4,opt,name=active"`
+		Succeeded int32 `json:"succeeded,omitempty" protobuf:"varint,5,opt,name=succeeded"`
+		Failed int32 `json:"failed,omitempty" protobuf:"varint,6,opt,name=failed"`
+	*/
 	jm.updateHandler = jm.updateJobStatus
+	// 同步job状态方法
 	jm.syncHandler = jm.syncJob
 
 	return jm

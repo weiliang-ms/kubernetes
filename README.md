@@ -5,7 +5,7 @@
 <img src="https://github.com/kubernetes/kubernetes/raw/master/logo/logo.png" width="100">
 
 ----
-- [控制器]()
+- [控制器](notes/controller-manager/controller-manager.md)
     - [job-controller](notes/controller-manager/job-controller.md)
 
 - 参考文献
