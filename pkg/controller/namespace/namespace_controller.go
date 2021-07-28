@@ -189,6 +189,7 @@ func (nm *NamespaceController) syncNamespaceFromKey(key string) (err error) {
 		utilruntime.HandleError(fmt.Errorf("Unable to retrieve namespace %v from store: %v", key, err))
 		return err
 	}
+	// 删除ns
 	return nm.namespacedResourcesDeleter.Delete(namespace.Name)
 }
 

@@ -652,7 +652,6 @@ func readCA(file string) ([]byte, error) {
 func shouldTurnOnDynamicClient(client clientset.Interface) bool {
 	/*
 		判断特性列表是否含有：TokenRequest（beta: v1.12）,default=true
-		// todo://特性列表如何默认赋值的？
 	*/
 	if !utilfeature.DefaultFeatureGate.Enabled(features.TokenRequest) {
 		return false

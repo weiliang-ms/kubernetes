@@ -462,18 +462,20 @@ func startModifiedNamespaceController(ctx ControllerContext, namespaceKubeClient
 		return nil, true, err
 	}
 
+	// 获取命名空间下资源方法
 	discoverResourcesFn := namespaceKubeClient.Discovery().ServerPreferredNamespacedResources
-
+	// 初始化namespace控制器
 	namespaceController := namespacecontroller.NewNamespaceController(
 		namespaceKubeClient,
 		metadataClient,
 		discoverResourcesFn,
 		ctx.InformerFactory.Core().V1().Namespaces(),
+		// 三分钟同步一次namespace资源信息
 		ctx.ComponentConfig.NamespaceController.NamespaceSyncPeriod.Duration,
 		v1.FinalizerKubernetes,
 	)
 	fmt.Println(ctx.ComponentConfig.NamespaceController.ConcurrentNamespaceSyncs)
-	// 5m0s同步一次
+	// 开启10个线程进程监听
 	go namespaceController.Run(int(ctx.ComponentConfig.NamespaceController.ConcurrentNamespaceSyncs), ctx.Stop)
 
 	return nil, true, nil

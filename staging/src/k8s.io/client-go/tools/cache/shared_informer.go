@@ -219,6 +219,7 @@ const (
 // WaitForNamedCacheSync is a wrapper around WaitForCacheSync that generates log messages
 // indicating that the caller identified by name is waiting for syncs, followed by
 // either a successful or failed sync.
+// 封装了WaitForCacheSync()
 func WaitForNamedCacheSync(controllerName string, stopCh <-chan struct{}, cacheSyncs ...InformerSynced) bool {
 	klog.Infof("Waiting for caches to sync for %s", controllerName)
 

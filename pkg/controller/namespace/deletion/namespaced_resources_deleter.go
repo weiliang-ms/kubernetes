@@ -96,6 +96,8 @@ func (d *namespacedResourcesDeleter) Delete(nsName string) error {
 	// Multiple controllers may edit a namespace during termination
 	// first get the latest state of the namespace before proceeding
 	// if the namespace was deleted already, don't do anything
+
+	// 从api-sever查询该namespace实例
 	namespace, err := d.nsClient.Get(context.TODO(), nsName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -120,11 +122,17 @@ func (d *namespacedResourcesDeleter) Delete(nsName string) error {
 	}
 
 	// the latest view of the namespace asserts that namespace is no longer deleting..
+	// 判断 metadata.deletionTimestamp是否为空，为空说明未被删除
+	/*
+		当 metadata.deletionTimestamp 字段被设置时，
+		负责监测该对象的各个控制器会通过轮询对该对象的更新请求来执行它们所要处理的所有Finalizer。
+	*/
 	if namespace.DeletionTimestamp.IsZero() {
 		return nil
 	}
 
 	// return if it is already finalized.
+	// 判断 .Spec.Finalizers 是否为空
 	if finalized(namespace) {
 		return nil
 	}
@@ -242,6 +250,7 @@ type updateNamespaceFunc func(namespace *v1.Namespace) (*v1.Namespace, error)
 func (d *namespacedResourcesDeleter) retryOnConflictError(namespace *v1.Namespace, fn updateNamespaceFunc) (result *v1.Namespace, err error) {
 	latestNamespace := namespace
 	for {
+		// 将命名空间状态调整为 `Terminating`
 		result, err = fn(latestNamespace)
 		if err == nil {
 			return result, nil
