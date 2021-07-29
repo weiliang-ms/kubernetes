@@ -4,7 +4,7 @@
 
 ## 简介
 
-> 生么是`kube-controller-manager`？
+> 什么是`kube-controller-manager`？
 
 `Controller Manager`是`Kubernetes`的核心组件之一。
 `Kubernetes`对集群的管理采用的是控制器模式，即针对各种资源运行多个`controller`（控制器）。

@@ -471,7 +471,8 @@ func startModifiedNamespaceController(ctx ControllerContext, namespaceKubeClient
 		discoverResourcesFn,
 		ctx.InformerFactory.Core().V1().Namespaces(),
 		// 三分钟同步一次namespace资源信息
-		ctx.ComponentConfig.NamespaceController.NamespaceSyncPeriod.Duration,
+		//ctx.ComponentConfig.NamespaceController.NamespaceSyncPeriod.Duration,
+		time.Second*30, // debug放开
 		v1.FinalizerKubernetes,
 	)
 	fmt.Println(ctx.ComponentConfig.NamespaceController.ConcurrentNamespaceSyncs)

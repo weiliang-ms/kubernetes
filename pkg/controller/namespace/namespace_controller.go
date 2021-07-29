@@ -82,6 +82,7 @@ func NewNamespaceController(
 	}
 
 	// configure the namespace informer event handlers
+	// 添加event回调函数
 	namespaceInformer.Informer().AddEventHandlerWithResyncPeriod(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -124,12 +125,25 @@ func (nm *NamespaceController) enqueueNamespace(obj interface{}) {
 
 	namespace := obj.(*v1.Namespace)
 	// don't queue if we aren't deleted
+	// 如果ns没有被删除，直接返回，不添加至队列里待处理
+	// 实际监听并处理的仅是删除事件，其他事件监听后续添加？
 	if namespace.DeletionTimestamp == nil || namespace.DeletionTimestamp.IsZero() {
 		return
 	}
 
 	// delay processing namespace events to allow HA api servers to observe namespace deletion,
 	// and HA etcd servers to observe last minute object creations inside the namespace
+	// 延时5s添加至队列
+	/*
+		namespaceDeletionGracePeriod是处理收到的命名空间事件之前要等待的时间段
+		这样就有时间进行以下操作：
+		1.高可用API-Server上的生命周期许可插件也可以观察名称空间
+		2.删除并防止在终止命名空间中创建新对象
+		3.用于观察命名空间中最后一分钟对象创建的非先导etcd服务器
+
+		因此，该控制器的清理实际上可以清理所有对象
+
+	*/
 	nm.queue.AddAfter(key, namespaceDeletionGracePeriod)
 }
 
