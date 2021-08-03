@@ -113,6 +113,7 @@ func (d *namespacedResourcesDeleter) Delete(nsName string) error {
 
 	// ensure that the status is up to date on the namespace
 	// if we get a not found error, we assume the namespace is truly gone
+	// 更新namespace状态为 Terminating
 	namespace, err = d.retryOnConflictError(namespace, d.updateNamespaceStatusFunc)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -122,17 +123,13 @@ func (d *namespacedResourcesDeleter) Delete(nsName string) error {
 	}
 
 	// the latest view of the namespace asserts that namespace is no longer deleting..
-	// 判断 metadata.deletionTimestamp是否为空，为空说明未被删除
-	/*
-		当 metadata.deletionTimestamp 字段被设置时，
-		负责监测该对象的各个控制器会通过轮询对该对象的更新请求来执行它们所要处理的所有Finalizer。
-	*/
+	// 判断 metadata.deletionTimestamp是否为空，为空说明将不再被删除
 	if namespace.DeletionTimestamp.IsZero() {
 		return nil
 	}
 
 	// return if it is already finalized.
-	// 判断 .Spec.Finalizers 是否为空
+	// 判断 .Spec.Finalizers 是否为空，为空说明已被删除，直接返回，不走下面逻辑
 	if finalized(namespace) {
 		return nil
 	}

@@ -1,0 +1,10 @@
+# Namespace Controller
+Namespace Controller定时通过api server读取这些namespace信息，
+如果namespace被api标识为优雅删除(通过设置删除期限，即DeletionTimestamp属性被设置)，
+则将该namespace的状态设置为“Terminating”并保存到etcd中。
+
+同时namespace controller删除该namespace下的serviceAccount、rc、pod、secret、persistentVolume、listRange、resourceQuota和event等资源对象。
+
+当namespace处于“terminating”后，由admission controller的namespacelifecycle插件来阻止为该namespace创建新的资源。同时，在删除所有资源后，namespace controller对该namespace执行finalize操作，删除namespace的spec.finalizers域中的信息
+
+如果namespace controller观察到namespace设置了删除期限，同时其spec.finalizers域值为空时，namespace controller将通过api server删除该namespace资源。

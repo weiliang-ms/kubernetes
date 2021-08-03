@@ -235,6 +235,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 				klog.V(1).Infof("using dynamic client builder")
 				//Dynamic builder will use TokenRequest feature and refresh service account token periodically
 				// NewDynamicClientBuilder将使用TokenRequest特性并定期刷新服务帐户令牌
+				// 动态客户端可访问自定义资源（CRD）
 				clientBuilder = controller.NewDynamicClientBuilder(
 					// 拷贝集群连接配置
 					restclient.AnonymousClientConfig(c.Kubeconfig),
@@ -588,16 +589,19 @@ type serviceAccountTokenControllerStarter struct {
 	rootClientBuilder controller.ControllerClientBuilder
 }
 
+// 启动SA控制器
 func (c serviceAccountTokenControllerStarter) startServiceAccountTokenController(ctx ControllerContext) (http.Handler, bool, error) {
+	// 判断是否开启SA控制器，默认开启
 	if !ctx.IsControllerEnabled(saTokenControllerName) {
 		klog.Warningf("%q is disabled", saTokenControllerName)
 		return nil, false, nil
 	}
-
+	// 判断ca证书文件
 	if len(ctx.ComponentConfig.SAController.ServiceAccountKeyFile) == 0 {
 		klog.Warningf("%q is disabled because there is no private key", saTokenControllerName)
 		return nil, false, nil
 	}
+	// 获取私钥
 	privateKey, err := keyutil.PrivateKeyFromFile(ctx.ComponentConfig.SAController.ServiceAccountKeyFile)
 	if err != nil {
 		return nil, true, fmt.Errorf("error reading key for service account token controller: %v", err)
@@ -616,6 +620,7 @@ func (c serviceAccountTokenControllerStarter) startServiceAccountTokenController
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to build token generator: %v", err)
 	}
+	// 初始化token控制器，监听service account 与 secret资源
 	controller, err := serviceaccountcontroller.NewTokensController(
 		ctx.InformerFactory.Core().V1().ServiceAccounts(),
 		ctx.InformerFactory.Core().V1().Secrets(),

@@ -71,21 +71,22 @@ type TokensControllerOptions struct {
 
 // NewTokensController returns a new *TokensController.
 func NewTokensController(serviceAccounts informers.ServiceAccountInformer, secrets informers.SecretInformer, cl clientset.Interface, options TokensControllerOptions) (*TokensController, error) {
+	// 初始化默认重试次数：10
 	maxRetries := options.MaxRetries
 	if maxRetries == 0 {
 		maxRetries = 10
 	}
-
+	// 初始化token控制器
 	e := &TokensController{
 		client: cl,
 		token:  options.TokenGenerator,
 		rootCA: options.RootCA,
-
+		// 初始化队列： 1、存放service资源限速队列 2、存放secret资源限速队列
 		syncServiceAccountQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "serviceaccount_tokens_service"),
 		syncSecretQueue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "serviceaccount_tokens_secret"),
-
-		maxRetries: maxRetries,
+		maxRetries:              maxRetries,
 	}
+	//
 	if cl != nil && cl.CoreV1().RESTClient().GetRateLimiter() != nil {
 		if err := ratelimiter.RegisterMetricAndTrackRateLimiterUsage("serviceaccount_tokens_controller", cl.CoreV1().RESTClient().GetRateLimiter()); err != nil {
 			return nil, err
@@ -102,8 +103,9 @@ func NewTokensController(serviceAccounts informers.ServiceAccountInformer, secre
 		},
 		options.ServiceAccountResync,
 	)
-
+	// 初始化本地缓存对象
 	secretCache := secrets.Informer().GetIndexer()
+	// 初始化用于更新indexer的MutationCache对象，MutationCache会监控indexer变化（控制器修改indexer数据导致数据变化）
 	e.updatedSecrets = cache.NewIntegerResourceVersionMutationCache(secretCache, secretCache, 60*time.Second, true)
 	e.secretSynced = secrets.Informer().HasSynced
 	secrets.Informer().AddEventHandlerWithResyncPeriod(

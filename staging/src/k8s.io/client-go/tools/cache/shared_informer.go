@@ -133,20 +133,20 @@ type SharedInformer interface {
 	// period.  Events to a single handler are delivered sequentially, but there is no coordination
 	// between different handlers.
 	AddEventHandler(handler ResourceEventHandler)
-	// AddEventHandlerWithResyncPeriod adds an event handler to the
-	// shared informer with the requested resync period; zero means
-	// this handler does not care about resyncs.  The resync operation
-	// consists of delivering to the handler an update notification
-	// for every object in the informer's local cache; it does not add
-	// any interactions with the authoritative storage.  Some
-	// informers do no resyncs at all, not even for handlers added
-	// with a non-zero resyncPeriod.  For an informer that does
-	// resyncs, and for each handler that requests resyncs, that
-	// informer develops a nominal resync period that is no shorter
-	// than the requested period but may be longer.  The actual time
-	// between any two resyncs may be longer than the nominal period
-	// because the implementation takes time to do work and there may
-	// be competing load and scheduling noise.
+	//AddEventHandlerWithResyncPeriod adds an event handler to the
+	//shared informer with the requested resync period; zero means
+	//this handler does not care about resyncs.  The resync operation
+	//consists of delivering to the handler an update notification
+	//for every object in the informer's local cache; it does not add
+	//any interactions with the authoritative storage.  Some
+	//informers do no resyncs at all, not even for handlers added
+	//with a non-zero resyncPeriod.  For an informer that does
+	//resyncs, and for each handler that requests resyncs, that
+	//informer develops a nominal resync period that is no shorter
+	//than the requested period but may be longer.  The actual time
+	//between any two resyncs may be longer than the nominal period
+	//because the implementation takes time to do work and there may
+	//be competing load and scheduling noise.
 	AddEventHandlerWithResyncPeriod(handler ResourceEventHandler, resyncPeriod time.Duration)
 	// GetStore returns the informer's local cache as a Store.
 	GetStore() Store
@@ -658,14 +658,14 @@ type processorListener struct {
 	// we should try to do something better.
 	pendingNotifications buffer.RingGrowing
 
-	// requestedResyncPeriod is how frequently the listener wants a
-	// full resync from the shared informer, but modified by two
-	// adjustments.  One is imposing a lower bound,
-	// `minimumResyncPeriod`.  The other is another lower bound, the
-	// sharedProcessor's `resyncCheckPeriod`, that is imposed (a) only
-	// in AddEventHandlerWithResyncPeriod invocations made after the
-	// sharedProcessor starts and (b) only if the informer does
-	// resyncs at all.
+	//requestedResyncPeriod is how frequently the listener wants a
+	//full resync from the shared informer, but modified by two
+	//adjustments.  One is imposing a lower bound,
+	//`minimumResyncPeriod`.  The other is another lower bound, the
+	//sharedProcessor's `resyncCheckPeriod`, that is imposed (a) only
+	//in AddEventHandlerWithResyncPeriod invocations made after the
+	//sharedProcessor starts and (b) only if the informer does
+	//resyncs at all.
 	requestedResyncPeriod time.Duration
 	// resyncPeriod is the threshold that will be used in the logic
 	// for this listener.  This value differs from

@@ -443,7 +443,7 @@ func startNamespaceController(ctx ControllerContext) (http.Handler, bool, error)
 	// the ratelimiter negatively affects its speed.  Deleting 100 total items in a namespace (that's only a few of each resource
 	// including events), takes ~10 seconds by default.
 	/*
-		命名空间清理控制器非常繁忙。它会进行大量的发现调用，然后进行大量的删除调用，速率限制器会对它的速度产生负面影响。
+		命名空间清理控制器非常繁忙。它会进行大量的资源发现调用，然后进行大量的资源删除调用，速率限制器会对它的速度产生负面影响。
 		默认情况下，删除名称空间中的100个项目(这只是每个资源(包括事件)的一部分)大约需要10秒。
 	*/
 	// 初始化客户端
@@ -451,12 +451,15 @@ func startNamespaceController(ctx ControllerContext) (http.Handler, bool, error)
 	// 20 + 100
 	nsKubeconfig.QPS *= 20
 	nsKubeconfig.Burst *= 100
+	// NewForConfigOrDie为给定的配置创建一个新的客户端集，如果配置中有错误，它会崩溃
+	// 客户端集包括：各个资源的客户端连接
 	namespaceKubeClient := clientset.NewForConfigOrDie(nsKubeconfig)
 	return startModifiedNamespaceController(ctx, namespaceKubeClient, nsKubeconfig)
 }
 
 func startModifiedNamespaceController(ctx ControllerContext, namespaceKubeClient clientset.Interface, nsKubeconfig *restclient.Config) (http.Handler, bool, error) {
 
+	// metadataClient可以从Kubernetes的资源API获取元数据（以PartialObjectMetadata对象的形式）
 	metadataClient, err := metadata.NewForConfig(nsKubeconfig)
 	if err != nil {
 		return nil, true, err
@@ -476,7 +479,7 @@ func startModifiedNamespaceController(ctx ControllerContext, namespaceKubeClient
 		v1.FinalizerKubernetes,
 	)
 	fmt.Println(ctx.ComponentConfig.NamespaceController.ConcurrentNamespaceSyncs)
-	// 开启10个线程进程监听
+	// 开启10个协程进程监听
 	go namespaceController.Run(int(ctx.ComponentConfig.NamespaceController.ConcurrentNamespaceSyncs), ctx.Stop)
 
 	return nil, true, nil

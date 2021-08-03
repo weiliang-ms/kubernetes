@@ -166,6 +166,8 @@ func (nm *NamespaceController) worker() {
 			return false
 		}
 
+		// 判断命名空间下是否仍有资源未被删除，如果还有未被删除资源，获取资源个数。随后将该命名空间延时加入队列
+		// 如果没有未被删除资源，将该命名空间加入限速队列
 		if estimate, ok := err.(*deletion.ResourcesRemainingError); ok {
 			t := estimate.Estimate/2 + 1
 			klog.V(4).Infof("Content remaining in namespace %s, waiting %d seconds", key, t)
@@ -194,6 +196,7 @@ func (nm *NamespaceController) syncNamespaceFromKey(key string) (err error) {
 		klog.V(4).Infof("Finished syncing namespace %q (%v)", key, time.Since(startTime))
 	}()
 
+	// lister -> 带有List与Get方法的indexer对象
 	namespace, err := nm.lister.Get(key)
 	if errors.IsNotFound(err) {
 		klog.Infof("Namespace has been deleted %v", key)
