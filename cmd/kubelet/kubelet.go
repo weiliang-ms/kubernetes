@@ -34,6 +34,7 @@ import (
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
+	// 初始化kubelet指令
 	command := app.NewKubeletCommand()
 	logs.InitLogs()
 	defer logs.FlushLogs()

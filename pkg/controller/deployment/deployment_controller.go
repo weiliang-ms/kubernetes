@@ -108,11 +108,14 @@ func NewDeploymentController(dInformer appsinformers.DeploymentInformer, rsInfor
 			return nil, err
 		}
 	}
+
+	// 限速队列，客户端，事件分发器
 	dc := &DeploymentController{
 		client:        client,
 		eventRecorder: eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "deployment-controller"}),
 		queue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "deployment"),
 	}
+
 	dc.rsControl = controller.RealRSControl{
 		KubeClient: client,
 		Recorder:   dc.eventRecorder,
@@ -567,10 +570,13 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 		klog.V(4).Infof("Finished syncing deployment %q (%v)", key, time.Since(startTime))
 	}()
 
+	// 获取deployment的命名空间与名称
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
 	}
+
+	// 从本地缓存中获取该deployment对象
 	deployment, err := dc.dLister.Deployments(namespace).Get(name)
 	if errors.IsNotFound(err) {
 		klog.V(2).Infof("Deployment %v has been deleted", key)
@@ -584,6 +590,7 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	// TODO: Deep-copy only when needed.
 	d := deployment.DeepCopy()
 
+	// 判断selector是否为空，为空返回
 	everything := metav1.LabelSelector{}
 	if reflect.DeepEqual(d.Spec.Selector, &everything) {
 		dc.eventRecorder.Eventf(d, v1.EventTypeWarning, "SelectingAll", "This deployment is selecting all pods. A non-empty selector is required.")
@@ -596,6 +603,7 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 
 	// List ReplicaSets owned by this Deployment, while reconciling ControllerRef
 	// through adoption/orphaning.
+	// 获取deployment管理的rs资源
 	rsList, err := dc.getReplicaSetsForDeployment(d)
 	if err != nil {
 		return err
@@ -605,11 +613,13 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	//
 	// * check if a Pod is labeled correctly with the pod-template-hash label.
 	// * check that no old Pods are running in the middle of Recreate Deployments.
+	// 获取deployment管理的pod资源,并按rs进行分组
 	podMap, err := dc.getPodMapForDeployment(d, rsList)
 	if err != nil {
 		return err
 	}
 
+	// 如果该 deployment 处于删除状态，则更新其status
 	if d.DeletionTimestamp != nil {
 		return dc.syncStatusOnly(d, rsList)
 	}
@@ -617,10 +627,12 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	// Update deployment conditions with an Unknown condition when pausing/resuming
 	// a deployment. In this way, we can be sure that we won't timeout when a user
 	// resumes a Deployment with a set progressDeadlineSeconds.
+	// 检测deployment是否处于pause状态，如果处于pause状态，condition置为Unknown
 	if err = dc.checkPausedConditions(d); err != nil {
 		return err
 	}
 
+	// 判断是否处于Paused状态
 	if d.Spec.Paused {
 		return dc.sync(d, rsList)
 	}
@@ -628,10 +640,12 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 	// rollback is not re-entrant in case the underlying replica sets are updated with a new
 	// revision so we should ensure that we won't proceed to update replica sets until we
 	// make sure that the deployment has cleaned up its rollback spec in subsequent enqueues.
+	// 判断是否为回滚操作
 	if getRollbackTo(d) != nil {
 		return dc.rollback(d, rsList)
 	}
 
+	// 检查 deployment 是否处于 scale 状态
 	scalingEvent, err := dc.isScalingEvent(d, rsList)
 	if err != nil {
 		return err
@@ -640,6 +654,7 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 		return dc.sync(d, rsList)
 	}
 
+	// 更新操作
 	switch d.Spec.Strategy.Type {
 	case apps.RecreateDeploymentStrategyType:
 		return dc.rolloutRecreate(d, rsList, podMap)
