@@ -398,6 +398,11 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 
 ### 删除操作解析
 
+删除对象流程由`Kube-controller-manager`的垃圾回收器`(garbagecollector controller)`完成，
+资源控制器只负责修改状态
+
+删除对象时还需要指定一个删除选项(orphan、background 或者 foreground)来说明该对象如何删除
+
 > 检测对象的`metadata`中是否含有`DeletionTimestamp`字段
 
 ```go
@@ -408,6 +413,9 @@ if d.DeletionTimestamp != nil {
 
 > `syncStatusOnly()`
 
+首先通过`newRS`和`allRSs`计算`deployment`当前的`status`，然后和`deployment`中的`status`进行比较，
+若二者有差异则更新`deployment`使用最新的`status`
+
 ```go
 func (dc *DeploymentController) syncStatusOnly(d *apps.Deployment, rsList []*apps.ReplicaSet) error {
 	newRS, oldRSs, err := dc.getAllReplicaSetsAndSyncRevision(d, rsList, false)
@@ -417,6 +425,28 @@ func (dc *DeploymentController) syncStatusOnly(d *apps.Deployment, rsList []*app
 
 	allRSs := append(oldRSs, newRS)
 	return dc.syncDeploymentStatus(allRSs, newRS, d)
+}
+```
+
+获取最新`rs`对象与全部`rs`切片逻辑如下：
+
+1. 对上述获取的`rsList`（deployment所管里的rs集合）进行排序，排序规则按创建时间排序（最新创建排第一位，以此类推）
+2. 对排序后的`rs`集合遍历，找出最新`rs`对象（当且仅当rs的spec内容与deployment内容一致时返回该对象）
+3. 前两步已找出最新版本`rs`，接下来对`rsList`遍历，过滤出最新版本那个`rs`（通过uid属性），其他`rs`存入`oldRSs`切片中
+
+- `getAllReplicaSetsAndSyncRevision()`
+
+```go
+func (dc *DeploymentController) getAllReplicaSetsAndSyncRevision(d *apps.Deployment, rsList []*apps.ReplicaSet, createIfNotExisted bool) (*apps.ReplicaSet, []*apps.ReplicaSet, error) {
+	_, allOldRSs := deploymentutil.FindOldReplicaSets(d, rsList)
+
+	// Get new replica set with the updated revision number
+	newRS, err := dc.getNewReplicaSet(d, rsList, allOldRSs, createIfNotExisted)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return newRS, allOldRSs, nil
 }
 ```
 

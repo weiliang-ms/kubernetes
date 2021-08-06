@@ -643,7 +643,9 @@ func EqualIgnoreHash(template1, template2 *v1.PodTemplateSpec) bool {
 
 // FindNewReplicaSet returns the new RS this given deployment targets (the one with the same pod template).
 func FindNewReplicaSet(deployment *apps.Deployment, rsList []*apps.ReplicaSet) *apps.ReplicaSet {
+	// 按创建时间排序rs列表
 	sort.Sort(controller.ReplicaSetsByCreationTimestamp(rsList))
+	// 找到并返回deployment管理的最新版本rs资源对象（判断依据：spec模板内容）
 	for i := range rsList {
 		if EqualIgnoreHash(&rsList[i].Spec.Template, &deployment.Spec.Template) {
 			// In rare cases, such as after cluster upgrades, Deployment may end up with
@@ -662,6 +664,7 @@ func FindNewReplicaSet(deployment *apps.Deployment, rsList []*apps.ReplicaSet) *
 func FindOldReplicaSets(deployment *apps.Deployment, rsList []*apps.ReplicaSet) ([]*apps.ReplicaSet, []*apps.ReplicaSet) {
 	var requiredRSs []*apps.ReplicaSet
 	var allRSs []*apps.ReplicaSet
+	// 获取最新的rs对象（一般为当前运行的，获取方式 -> 按创建时间排序，取第一个rs spec内容与deployment spec内容相同的rs对象）
 	newRS := FindNewReplicaSet(deployment, rsList)
 	for _, rs := range rsList {
 		// Filter out new replica set
