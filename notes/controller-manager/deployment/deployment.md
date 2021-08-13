@@ -403,7 +403,7 @@ func (dc *DeploymentController) syncDeployment(key string) error {
 
 删除对象时还需要指定一个删除选项(orphan、background 或者 foreground)来说明该对象如何删除
 
-> 检测对象的`metadata`中是否含有`DeletionTimestamp`字段
+> 1.检测对象的`metadata`中是否含有`DeletionTimestamp`字段
 
 ```go
 if d.DeletionTimestamp != nil {
@@ -411,7 +411,7 @@ if d.DeletionTimestamp != nil {
 	}
 ```
 
-> `syncStatusOnly()`
+> 2.`syncStatusOnly()`函数实体
 
 首先通过`newRS`和`allRSs`计算`deployment`当前的`status`，然后和`deployment`中的`status`进行比较，
 若二者有差异则更新`deployment`使用最新的`status`
@@ -424,6 +424,7 @@ func (dc *DeploymentController) syncStatusOnly(d *apps.Deployment, rsList []*app
 	}
 
 	allRSs := append(oldRSs, newRS)
+	// 同步状态
 	return dc.syncDeploymentStatus(allRSs, newRS, d)
 }
 ```
@@ -449,6 +450,152 @@ func (dc *DeploymentController) getAllReplicaSetsAndSyncRevision(d *apps.Deploym
 	return newRS, allOldRSs, nil
 }
 ```
+
+接下来我们看下同步状态这个函数，做了哪些操作
+
+> 3.`syncDeploymentStatus()`函数主体
+
+```go
+func (dc *DeploymentController) syncDeploymentStatus(allRSs []*apps.ReplicaSet, newRS *apps.ReplicaSet, d *apps.Deployment) error {
+	newStatus := calculateStatus(allRSs, newRS, d)
+
+	if reflect.DeepEqual(d.Status, newStatus) {
+		return nil
+	}
+
+	newDeployment := d
+	newDeployment.Status = newStatus
+	_, err := dc.client.AppsV1().Deployments(newDeployment.Namespace).UpdateStatus(context.TODO(), newDeployment, metav1.UpdateOptions{})
+	return err
+}
+```
+
+### 暂停和恢复操作解析
+
+暂停以及恢复两个操作都是通过更新`deployment`的`spec.paused`字段实现的，下面直接看它的具体实现。
+
+> 函数主体
+
+```go
+// 判断是否处于Paused状态
+if d.Spec.Paused {
+    return dc.sync(d, rsList)
+}
+```
+
+> `sync()`函数
+
+当触发暂停操作时，会调用`sync`方法进行操作，`sync`方法的主要逻辑如下所示：
+- 获取最新版本`rs`和历史版本`rs`版本集合
+- 根据`newRS`和`oldRSs`判断是否需要`scale`操作
+- 若处于暂停状态且没有执行回滚操作，则根据`deployment`的`.spec.revisionHistoryLimit`中的值清理多余的`rs`
+- 最后执行`syncDeploymentStatus`更新`status`
+```go
+func (dc *DeploymentController) sync(d *apps.Deployment, rsList []*apps.ReplicaSet) error {
+	newRS, oldRSs, err := dc.getAllReplicaSetsAndSyncRevision(d, rsList, false)
+	if err != nil {
+		return err
+	}
+	if err := dc.scale(d, newRS, oldRSs); err != nil {
+		// If we get an error while trying to scale, the deployment will be requeued
+		// so we can abort this resync
+		return err
+	}
+
+	// Clean up the deployment when it's paused and no rollback is in flight.
+	if d.Spec.Paused && getRollbackTo(d) == nil {
+		if err := dc.cleanupDeployment(oldRSs, d); err != nil {
+			return err
+		}
+	}
+
+	allRSs := append(oldRSs, newRS)
+	return dc.syncDeploymentStatus(allRSs, newRS, d)
+}
+```
+
+上文已经提到过`deployment controller`在一个`syncLoop`中各种操作是有优先级，
+而`pause > rollback > scale > rollout`，通过文章开头的命令行参数也可以看出，
+暂停和恢复操作只有在`rollout`时才会生效，再结合源码分析，
+虽然暂停操作下不会执行到`scale`相关的操作，但是`pause`与`scale`都是调用`sync`方法完成的，
+且在`sync`方法中会首先检查`scale`操作是否完成，也就是说在`pause`操作后并不是立即暂停所有操作，
+例如，当执行滚动更新操作后立即执行暂停操作，此时滚动更新的第一个周期并不会立刻停止而是会等到滚动更新的第一个周期完成后才会处于暂停状态，
+在下文的滚动更新一节会有例子进行详细的分析，至于`scale`操作在下文也会进行详细分析
+
+### 回滚操作解析
+
+`kubernetes`中的每一个`Deployment`资源都包含有`revision`这个概念，
+并且其`.spec.revisionHistoryLimit`字段指定了需要保留的历史版本数，
+默认为`10`，每个版本都会对应一个`rs`，若发现集群中有大量`0/0 rs`时请不要删除它，
+这些`rs`对应的都是`deployment`的历史版本，否则会导致无法回滚。
+当一个`deployment`的历史`rs`数超过指定数时，`deployment controller`会自动清理。
+
+当在客户端触发回滚操作时，`controller`会调用`getRollbackTo`进行判断并调用`rollback`执行对应的回滚操作。
+
+> 回滚函数入口
+```go
+if getRollbackTo(d) != nil {
+      return dc.rollback(d, rsList)
+  }
+```
+
+> `rollback()`函数主体
+
+`getRollbackTo`通过判断`deployment`是否存在`rollback`对应的注解然后获取其值作为目标版本。
+
+主要逻辑如下:
+1. 获取`newRS`和`oldRSs`
+2. 调用`getRollbackTo`获取`rollback`的`revision`
+3. 判断`revision`以及对应的`rs`是否存在，若`revision`为`0`，则表示回滚到上一个版本
+4. 若存在对应的`rs`，则调用`rollbackToTemplate`方法将`rs.Spec.Template`赋值给`d.Spec.Template`，否则放弃回滚操作
+
+```go
+func (dc *DeploymentController) rollback(d *apps.Deployment, rsList []*apps.ReplicaSet) error {
+    // 1、获取 newRS 和 oldRSs
+	newRS, allOldRSs, err := dc.getAllReplicaSetsAndSyncRevision(d, rsList, true)
+	if err != nil {
+		return err
+	}
+
+	allRSs := append(allOldRSs, newRS)
+    // 2、调用 getRollbackTo 获取 rollback 的 revision
+	rollbackTo := getRollbackTo(d)
+    // 3、判断 revision 以及对应的 rs 是否存在，若 revision 为 0，则回滚至上一个版本
+	if rollbackTo.Revision == 0 {
+		if rollbackTo.Revision = deploymentutil.LastRevision(allRSs); rollbackTo.Revision == 0 {
+			// If we still can't find the last revision, gives up rollback
+			dc.emitRollbackWarningEvent(d, deploymentutil.RollbackRevisionNotFound, "Unable to find last revision.")
+			// Gives up rollback
+			return dc.updateDeploymentAndClearRollbackTo(d)
+		}
+	}
+	for _, rs := range allRSs {
+		v, err := deploymentutil.Revision(rs)
+		if err != nil {
+			klog.V(4).Infof("Unable to extract revision from deployment's replica set %q: %v", rs.Name, err)
+			continue
+		}
+		if v == rollbackTo.Revision {
+			klog.V(4).Infof("Found replica set %q with desired revision %d", rs.Name, v)
+			// rollback by copying podTemplate.Spec from the replica set
+			// revision number will be incremented during the next getAllReplicaSetsAndSyncRevision call
+			// no-op if the spec matches current deployment's podTemplate.Spec
+			performedRollback, err := dc.rollbackToTemplate(d, rs)
+			if performedRollback && err == nil {
+				dc.emitRollbackNormalEvent(d, fmt.Sprintf("Rolled back deployment %q to revision %d", d.Name, rollbackTo.Revision))
+			}
+			return err
+		}
+	}
+	dc.emitRollbackWarningEvent(d, deploymentutil.RollbackRevisionNotFound, "Unable to find the revision to rollback to.")
+	// Gives up rollback
+	return dc.updateDeploymentAndClearRollbackTo(d)
+}
+```
+
+`rollbackToTemplate`会判断`deployment.Spec.Template`和`rs.Spec.Template`是否相等，
+若相等则无需回滚，否则使用`rs.Spec.Template`替换`deployment.Spec.Template`，
+然后更新`deployment`的`spec`并清除回滚标志
 
 
 

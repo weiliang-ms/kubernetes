@@ -91,6 +91,7 @@ func (s *runtimeState) runtimeErrors() error {
 	s.RLock()
 	defer s.RUnlock()
 	errs := []error{}
+	// 判断上次同步的时间是否是0值
 	if s.lastBaseRuntimeSync.IsZero() {
 		errs = append(errs, errors.New("container runtime status check may not have completed yet"))
 	} else if !s.lastBaseRuntimeSync.Add(s.baseRuntimeSyncThreshold).After(time.Now()) {

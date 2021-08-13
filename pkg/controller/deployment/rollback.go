@@ -32,12 +32,14 @@ import (
 
 // rollback the deployment to the specified revision. In any case cleanup the rollback spec.
 func (dc *DeploymentController) rollback(d *apps.Deployment, rsList []*apps.ReplicaSet) error {
+	// 1.获取`rs`
 	newRS, allOldRSs, err := dc.getAllReplicaSetsAndSyncRevision(d, rsList, true)
 	if err != nil {
 		return err
 	}
 
 	allRSs := append(allOldRSs, newRS)
+	// 2.获取回滚版本
 	rollbackTo := getRollbackTo(d)
 	// If rollback revision is 0, rollback to the last revision
 	if rollbackTo.Revision == 0 {

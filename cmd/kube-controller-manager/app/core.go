@@ -513,6 +513,7 @@ func startGarbageCollectorController(ctx ControllerContext) (http.Handler, bool,
 		return nil, false, nil
 	}
 
+	// 1、初始化 discoveryClient
 	gcClientset := ctx.ClientBuilder.ClientOrDie("generic-garbage-collector")
 	discoveryClient := cacheddiscovery.NewMemCacheClient(gcClientset.Discovery())
 
@@ -522,12 +523,15 @@ func startGarbageCollectorController(ctx ControllerContext) (http.Handler, bool,
 		return nil, true, err
 	}
 
+	// 2、获取可删除资源
 	// Get an initial set of deletable resources to prime the garbage collector.
 	deletableResources := garbagecollector.GetDeletableResources(discoveryClient)
 	ignoredResources := make(map[schema.GroupResource]struct{})
+	// 3、忽略删除event资源
 	for _, r := range ctx.ComponentConfig.GarbageCollectorController.GCIgnoredResources {
 		ignoredResources[schema.GroupResource{Group: r.Group, Resource: r.Resource}] = struct{}{}
 	}
+	// 4、初始化GarbageCollector
 	garbageCollector, err := garbagecollector.NewGarbageCollector(
 		metadataClient,
 		ctx.RESTMapper,
@@ -540,10 +544,12 @@ func startGarbageCollectorController(ctx ControllerContext) (http.Handler, bool,
 		return nil, true, fmt.Errorf("failed to start the generic garbage collector: %v", err)
 	}
 
+	// 5、调用 garbageCollector.Run 启动 garbageCollecto
 	// Start the garbage collector.
 	workers := int(ctx.ComponentConfig.GarbageCollectorController.ConcurrentGCSyncs)
 	go garbageCollector.Run(workers, ctx.Stop)
 
+	// 6、调用 garbageCollector.Sync 监听集群中的 DeletableResources ，当出现新的  DeletableResources 时同步到 monitors 中，确保监控集群中的所有资源；
 	// Periodically refresh the RESTMapper with new discovery information and sync
 	// the garbage collector.
 	go garbageCollector.Sync(gcClientset.Discovery(), 30*time.Second, ctx.Stop)

@@ -7,6 +7,8 @@
 ----
 - [控制器](notes/controller-manager/controller-manager.md)
     - [job-controller](notes/controller-manager/job-controller.md)
+- [kubelet]()
+  - [新增pod流程分析](notes/kubelet/add-pod.md)
 
 - 参考文献
     - [source-code-reading-notes](https://blog.tianfeiyu.com/source-code-reading-notes/)

@@ -1527,6 +1527,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 		return fmt.Errorf("pod %q is pending termination", podFullName)
 	}
 
+	// 主工作流的延迟测量是与API服务器第一次看到pod的时间相关的。
 	// Latency measurements for the main workflow are relative to the
 	// first time the pod was seen by the API server.
 	var firstSeenTime time.Time
@@ -1567,6 +1568,7 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 		metrics.PodStartDuration.Observe(metrics.SinceInSeconds(firstSeenTime))
 	}
 
+	// 检查 pod 是否能运行在本节点
 	runnable := kl.canRunPod(pod)
 	if !runnable.Admit {
 		// Pod is not runnable; update the Pod and Container statuses to why.
@@ -1870,12 +1872,13 @@ func (kl *Kubelet) syncLoop(updates <-chan kubetypes.PodUpdate, handler SyncHand
 			klog.Errorf("skipping pod synchronization - %v", err)
 			// exponential backoff
 			time.Sleep(duration)
+			// 返回最小的，依次0.2 -> 0.4 -> 0.8 -> 1.6 -> 3.2 -> 5 -> 5 -> ...
 			duration = time.Duration(math.Min(float64(max), factor*float64(duration)))
 			continue
 		}
 		// reset backoff if we have a success
 		duration = base
-
+		// 记录时间
 		kl.syncLoopMonitor.Store(kl.clock.Now())
 		if !kl.syncLoopIteration(updates, handler, syncTicker.C, housekeepingTicker.C, plegCh) {
 			break
@@ -2073,26 +2076,23 @@ func (kl *Kubelet) handleMirrorPod(mirrorPod *v1.Pod, start time.Time) {
 // a config source.
 func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 	start := kl.clock.Now()
+	// 1. 把所有的`pod`按照创建日期进行排序，保证最先创建的`pod`会最先被处理
 	sort.Sort(sliceutils.PodsByCreationTime(pods))
+	// 递归pod入参，添加到podManager
 	for _, pod := range pods {
+		// 获取podManager所有被管理的pod
 		existingPods := kl.podManager.GetPods()
-		// Always add the pod to the pod manager. Kubelet relies on the pod
-		// manager as the source of truth for the desired state. If a pod does
-		// not exist in the pod manager, it means that it has been deleted in
-		// the apiserver and no action (other than cleanup) is required.
+		// 添加新增pod,如果Pod已存在则更新pod信息
 		kl.podManager.AddPod(pod)
 
+		// 判断是否为静态pod
 		if kubetypes.IsMirrorPod(pod) {
 			kl.handleMirrorPod(pod, start)
 			continue
 		}
-
+		// 判断pod状态非终止状态
 		if !kl.podIsTerminated(pod) {
-			// Only go through the admission process if the pod is not
-			// terminated.
-
-			// We failed pods that we rejected, so activePods include all admitted
-			// pods that are alive.
+			// 过滤出存活状态的pod
 			activePods := kl.filterOutTerminatedPods(existingPods)
 
 			// Check if we can admit the pod; if not, reject it.
@@ -2102,7 +2102,9 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 			}
 		}
 		mirrorPod, _ := kl.podManager.GetMirrorPodByPod(pod)
+		// 通过 dispatchWork 分发 pod 做异步处理，dispatchWork 主要工作就是把接收到的参数封装成 UpdatePodOptions，调用 UpdatePod 方法.
 		kl.dispatchWork(pod, kubetypes.SyncPodCreate, mirrorPod, start)
+		// 在 probeManager 中添加 pod，如果 pod 中定义了 readiness 和 liveness 健康检查，启动 goroutine 定期进行检测
 		kl.probeManager.AddPod(pod)
 	}
 }

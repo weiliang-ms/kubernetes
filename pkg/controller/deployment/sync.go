@@ -35,12 +35,15 @@ import (
 
 // syncStatusOnly only updates Deployments Status and doesn't take any mutating actions.
 func (dc *DeploymentController) syncStatusOnly(d *apps.Deployment, rsList []*apps.ReplicaSet) error {
+	// 获取rs列表：最新rs & 非最新rs集合
 	newRS, oldRSs, err := dc.getAllReplicaSetsAndSyncRevision(d, rsList, false)
 	if err != nil {
 		return err
 	}
 
+	// 组装rs集合
 	allRSs := append(oldRSs, newRS)
+	// 进行状态同步
 	return dc.syncDeploymentStatus(allRSs, newRS, d)
 }
 
@@ -470,8 +473,11 @@ func (dc *DeploymentController) cleanupDeployment(oldRSs []*apps.ReplicaSet, dep
 
 // syncDeploymentStatus checks if the status is up-to-date and sync it if necessary
 func (dc *DeploymentController) syncDeploymentStatus(allRSs []*apps.ReplicaSet, newRS *apps.ReplicaSet, d *apps.Deployment) error {
+
+	// 获取最新status
 	newStatus := calculateStatus(allRSs, newRS, d)
 
+	// 判断deployment状态是否发生改变(如删除情况副本数会变为1)
 	if reflect.DeepEqual(d.Status, newStatus) {
 		return nil
 	}
@@ -484,8 +490,11 @@ func (dc *DeploymentController) syncDeploymentStatus(allRSs []*apps.ReplicaSet, 
 
 // calculateStatus calculates the latest status for the provided deployment by looking into the provided replica sets.
 func calculateStatus(allRSs []*apps.ReplicaSet, newRS *apps.ReplicaSet, deployment *apps.Deployment) apps.DeploymentStatus {
+	// 1.获取rs集合所有可用的副本数量 -> status.availableReplicas字段
 	availableReplicas := deploymentutil.GetAvailableReplicaCountForReplicaSets(allRSs)
+	// 2.获取rs集合所有副本数量 -> spec.replicas字段
 	totalReplicas := deploymentutil.GetReplicaCountForReplicaSets(allRSs)
+	// 3.获取不可用rs副本数量
 	unavailableReplicas := totalReplicas - availableReplicas
 	// If unavailableReplicas is negative, then that means the Deployment has more available replicas running than
 	// desired, e.g. whenever it scales down. In such a case we should simply default unavailableReplicas to zero.
@@ -493,13 +502,19 @@ func calculateStatus(allRSs []*apps.ReplicaSet, newRS *apps.ReplicaSet, deployme
 		unavailableReplicas = 0
 	}
 
+	// 初始化deployment status对象
 	status := apps.DeploymentStatus{
 		// TODO: Ensure that if we start retrying status updates, we won't pick up a new Generation value.
-		ObservedGeneration:  deployment.Generation,
-		Replicas:            deploymentutil.GetActualReplicaCountForReplicaSets(allRSs),
-		UpdatedReplicas:     deploymentutil.GetActualReplicaCountForReplicaSets([]*apps.ReplicaSet{newRS}),
-		ReadyReplicas:       deploymentutil.GetReadyReplicaCountForReplicaSets(allRSs),
-		AvailableReplicas:   availableReplicas,
+		ObservedGeneration: deployment.Generation,
+		// spec.replicas字段 -> 从rs集合获取当前spec.replicas字段总和
+		Replicas: deploymentutil.GetActualReplicaCountForReplicaSets(allRSs),
+		// 从最新rs获取当前spec.replicas字段
+		UpdatedReplicas: deploymentutil.GetActualReplicaCountForReplicaSets([]*apps.ReplicaSet{newRS}),
+		// status.readyReplicas字段 -> 从rs集合获取当前status.readyReplicas字段总和
+		ReadyReplicas: deploymentutil.GetReadyReplicaCountForReplicaSets(allRSs),
+		// status.availableReplicas字段
+		AvailableReplicas: availableReplicas,
+		// status.availableReplicas字段 -> spec.replicas - status.availableReplicas
 		UnavailableReplicas: unavailableReplicas,
 		CollisionCount:      deployment.Status.CollisionCount,
 	}
