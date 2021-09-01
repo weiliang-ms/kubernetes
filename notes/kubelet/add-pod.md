@@ -249,7 +249,7 @@ func (kl *Kubelet) syncLoopIteration(configCh <-chan kubetypes.PodUpdate, handle
 `Kubelet`会通过`apiserver`为每一个`static pod`创建一个对应的`mirror pod`，
 如此以来就可以可以通过`kubectl`命令查看对应的`pod`,并且可以通过`kubectl logs`命令直接查看到`static pod`的日志信息。
 
-```go
+```
 func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 	start := kl.clock.Now()
 	sort.Sort(sliceutils.PodsByCreationTime(pods))
