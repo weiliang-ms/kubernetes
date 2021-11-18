@@ -231,7 +231,7 @@ func NewDockerService(config *ClientConfig, podSandboxImage string, streamingCon
 	}
 
 	// Determine the hairpin mode.
-	if err := effectiveHairpinMode(pluginSettings); err != nil {
+	if err := effectiveHairpinMode(pluginSettings); err != nil  {
 		// This is a non-recoverable error. Returning it up the callstack will just
 		// lead to retries of the same failure, so just fail hard.
 		return nil, err

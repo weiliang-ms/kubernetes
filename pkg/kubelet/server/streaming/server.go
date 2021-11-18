@@ -141,6 +141,7 @@ func NewServer(config Config, runtime Runtime) (Server, error) {
 				To(e.handler))
 		}
 	}
+	// 初始化web容器
 	handler := restful.NewContainer()
 	handler.Add(ws)
 	s.handler = handler

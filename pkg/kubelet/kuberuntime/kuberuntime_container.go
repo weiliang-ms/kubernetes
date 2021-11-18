@@ -206,10 +206,13 @@ func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandb
 	// Symlink container logs to the legacy container log location for cluster logging
 	// support.
 	// TODO(random-liu): Remove this after cluster logging supports CRI container log path.
+	// /var/log/containers
 	containerMeta := containerConfig.GetMetadata()
 	sandboxMeta := podSandboxConfig.GetMetadata()
 	legacySymlink := legacyLogSymlink(containerID, containerMeta.Name, sandboxMeta.Name,
 		sandboxMeta.Namespace)
+	// podSandboxConfig.LogDirectory="/var/log/pods/default_stakater-reloader-598f958967-ddkl7_2681cb7f-daa4-4620-bb60-1d449709181c"
+	//
 	containerLog := filepath.Join(podSandboxConfig.LogDirectory, containerConfig.LogPath)
 	// only create legacy symlink if containerLog path exists (or the error is not IsNotExist).
 	// Because if containerLog path does not exist, only dandling legacySymlink is created.
