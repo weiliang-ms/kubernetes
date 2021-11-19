@@ -150,12 +150,14 @@ func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandb
 	klog.V(4).Infof("Generating ref for container %s: %#v", container.Name, ref)
 
 	// For a new container, the RestartCount should be 0
+	// 如果该容器存在，则重启次数加1
 	restartCount := 0
 	containerStatus := podStatus.FindContainerStatusByName(container.Name)
 	if containerStatus != nil {
 		restartCount = containerStatus.RestartCount + 1
 	}
 
+	// 生成容器配置-获取临时容器ID
 	target, err := spec.getTargetID(podStatus)
 	if err != nil {
 		s, _ := grpcstatus.FromError(err)
@@ -247,29 +249,40 @@ func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandb
 
 // generateContainerConfig generates container config for kubelet runtime v1.
 func (m *kubeGenericRuntimeManager) generateContainerConfig(container *v1.Container, pod *v1.Pod, restartCount int, podIP, imageRef string, podIPs []string, nsTarget *kubecontainer.ContainerID) (*runtimeapi.ContainerConfig, func(), error) {
+	// 生成创建容器所需配置：环境变量列表、挂载点信息列表、映射到容器中的主机设备列表、容器端口映射列表、容器注解列表、容器根文件系统是否只读、主机名、
+	//
 	opts, cleanupAction, err := m.runtimeHelper.GenerateRunContainerOptions(pod, container, podIP, podIPs)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// 根据镜像名称，调用容器运行时，获取运行容器启动命令的用户
 	uid, username, err := m.getImageUser(container.Image)
 	if err != nil {
 		return nil, cleanupAction, err
 	}
 
 	// Verify RunAsNonRoot. Non-root verification only supports numeric user.
+	// 检测运行容器启动命令的用户判是否违反pod安全上下文设置（runAsNonRoot: true时，不允许容器以root用户启动）
 	if err := verifyRunAsNonRoot(pod, container, uid, username); err != nil {
 		return nil, cleanupAction, err
 	}
 
+	// 解析容器的启动命令与参数
 	command, args := kubecontainer.ExpandContainerCommandAndArgs(container, opts.Envs)
+
+	// 生成日志目录（格式为: /var/log/pods/<pod namespace>_<pod name>_<pod uid>/<容器名称>）
 	logDir := BuildContainerLogsDirectory(pod.Namespace, pod.Name, pod.UID, container.Name)
 	err = m.osInterface.MkdirAll(logDir, 0755)
 	if err != nil {
 		return nil, cleanupAction, fmt.Errorf("create container log directory for container %s failed: %v", container.Name, err)
 	}
+
+	// 定义pod下容器日志路径：<容器名称>/<容器重启次数>.log
 	containerLogsPath := buildContainerLogsPath(container.Name, restartCount)
+
 	restartCountUint32 := uint32(restartCount)
+	// 组装容器配置
 	config := &runtimeapi.ContainerConfig{
 		Metadata: &runtimeapi.ContainerMetadata{
 			Name:    container.Name,
@@ -290,11 +303,13 @@ func (m *kubeGenericRuntimeManager) generateContainerConfig(container *v1.Contai
 	}
 
 	// set platform specific configurations.
+	// 针对windows，定义额外配置
 	if err := m.applyPlatformSpecificContainerConfig(config, container, pod, uid, username, nsTarget); err != nil {
 		return nil, cleanupAction, err
 	}
 
 	// set environment variables
+	// 定义容器内的环境变量
 	envs := make([]*runtimeapi.KeyValue, len(opts.Envs))
 	for idx := range opts.Envs {
 		e := opts.Envs[idx]

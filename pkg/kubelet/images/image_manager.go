@@ -94,6 +94,7 @@ func (m *imageManager) EnsureImageExists(pod *v1.Pod, container *v1.Container, p
 	}
 
 	// If the image contains no tag or digest, a default tag should be applied.
+	// 为没有摘要或tag的镜像设置默认tag: latest
 	image, err := applyDefaultImageTag(container.Image)
 	if err != nil {
 		msg := fmt.Sprintf("Failed to apply default image tag %q: %v", container.Image, err)
@@ -101,6 +102,9 @@ func (m *imageManager) EnsureImageExists(pod *v1.Pod, container *v1.Container, p
 		return "", msg, ErrInvalidImageName
 	}
 
+	// 判断是否需要拉取镜像，以下情况需要拉取镜像：
+	// 1.容器的镜像拉取策略为Always
+	// 2.容器的镜像拉取策略为IfNotPresent，并且本地没有该镜像
 	spec := kubecontainer.ImageSpec{Image: image}
 	imageRef, err := m.imageService.GetImageRef(spec)
 	if err != nil {
@@ -110,6 +114,7 @@ func (m *imageManager) EnsureImageExists(pod *v1.Pod, container *v1.Container, p
 	}
 
 	present := imageRef != ""
+	// 当容器的镜像拉取策略为Never时只用本地的镜像而非从镜像库拉取
 	if !shouldPullImage(container, present) {
 		if present {
 			msg := fmt.Sprintf("Container image %q already present on machine", container.Image)
