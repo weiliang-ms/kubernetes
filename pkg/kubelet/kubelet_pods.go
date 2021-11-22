@@ -426,6 +426,7 @@ func (kl *Kubelet) GeneratePodHostNameAndDomain(pod *v1.Pod) (string, string, er
 		hostname = pod.Spec.Hostname
 	}
 
+	// 截取大于63个字符的hostname
 	hostname, err := truncatePodHostnameIfNeeded(pod.Name, hostname)
 	if err != nil {
 		return "", "", err
@@ -462,6 +463,7 @@ func (kl *Kubelet) GenerateRunContainerOptions(pod *v1.Pod, container *v1.Contai
 	if err != nil {
 		return nil, nil, err
 	}
+
 	opts.Hostname = hostname
 	podName := volumeutil.GetUniquePodName(pod)
 	volumes := kl.volumeManager.GetMountedVolumesForPod(podName)
