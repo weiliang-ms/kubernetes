@@ -84,16 +84,20 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 			Uid:       podUID,
 			Attempt:   attempt,
 		},
+		// 注入标签与注解
 		Labels:      newPodLabels(pod),
 		Annotations: newPodAnnotations(pod),
 	}
 
+	// dns配置
 	dnsConfig, err := m.runtimeHelper.GetPodDNS(pod)
 	if err != nil {
 		return nil, err
 	}
+
 	podSandboxConfig.DnsConfig = dnsConfig
 
+	// 非共享主机网络命名空间下情况下，生成pause容器的主机名
 	if !kubecontainer.IsHostNetworkPod(pod) {
 		// TODO: Add domain support in new runtime interface
 		hostname, _, err := m.runtimeHelper.GeneratePodHostNameAndDomain(pod)
@@ -103,9 +107,11 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 		podSandboxConfig.Hostname = hostname
 	}
 
+	// 日志目录
 	logDir := BuildPodLogsDirectory(pod.Namespace, pod.Name, pod.UID)
 	podSandboxConfig.LogDirectory = logDir
 
+	// 端口映射
 	portMappings := []*runtimeapi.PortMapping{}
 	for _, c := range pod.Spec.Containers {
 		containerPortMappings := kubecontainer.MakePortMappings(&c)
@@ -128,6 +134,7 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 		podSandboxConfig.PortMappings = portMappings
 	}
 
+	// linux相关配置：安全上下文、selinux、系统调用等
 	lc, err := m.generatePodSandboxLinuxConfig(pod)
 	if err != nil {
 		return nil, err

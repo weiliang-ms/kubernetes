@@ -273,6 +273,7 @@ func (im *realImageGCManager) detectImages(detectTime time.Time) (sets.String, e
 
 func (im *realImageGCManager) GarbageCollect() error {
 	// Get disk usage on disk holding images.
+	// 调用运行时获取存放镜像的文件系统状态：
 	fsStats, err := im.statsProvider.ImageFsStats()
 	if err != nil {
 		return err
@@ -300,7 +301,9 @@ func (im *realImageGCManager) GarbageCollect() error {
 
 	// If over the max threshold, free enough to place us at the lower threshold.
 	usagePercent := 100 - int(available*100/capacity)
+	// available=10G capacity=100G HighThresholdPercent=85% LowThresholdPercent=80%
 	if usagePercent >= im.policy.HighThresholdPercent {
+		// amountToFree=5G
 		amountToFree := capacity*int64(100-im.policy.LowThresholdPercent)/100 - available
 		klog.Infof("[imageGCManager]: Disk usage on image filesystem is at %d%% which is over the high threshold (%d%%). Trying to free %d bytes down to the low threshold (%d%%).", usagePercent, im.policy.HighThresholdPercent, amountToFree, im.policy.LowThresholdPercent)
 		freed, err := im.freeSpace(amountToFree, time.Now())
@@ -308,6 +311,7 @@ func (im *realImageGCManager) GarbageCollect() error {
 			return err
 		}
 
+		// 判断释放的容量与期望释放的容量
 		if freed < amountToFree {
 			err := fmt.Errorf("failed to garbage collect required amount of images. Wanted to free %d bytes, but freed %d bytes", amountToFree, freed)
 			im.recorder.Eventf(im.nodeRef, v1.EventTypeWarning, events.FreeDiskSpaceFailed, err.Error())
@@ -367,6 +371,7 @@ func (im *realImageGCManager) freeSpace(bytesToFree int64, freeTime time.Time) (
 		// Avoid garbage collect the image if the image is not old enough.
 		// In such a case, the image may have just been pulled down, and will be used by a container right away.
 
+		// 检测镜像是否到达回收时间（准备释放镜像时间）
 		if freeTime.Sub(image.firstDetected) < im.policy.MinAge {
 			klog.V(5).Infof("Image ID %s has age %v which is less than the policy's minAge of %v, not eligible for garbage collection", image.id, freeTime.Sub(image.firstDetected), im.policy.MinAge)
 			continue

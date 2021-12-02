@@ -392,6 +392,7 @@ func PreInitRuntimeService(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		return err
 	}
 
+	// 当运行时为docker 或 cri-o时，使用cadvisor采集容器指标
 	kubeDeps.useLegacyCadvisorStats = cadvisor.UsingLegacyCadvisorStats(containerRuntime, remoteRuntimeEndpoint)
 
 	return nil
@@ -1288,6 +1289,7 @@ func (kl *Kubelet) setupDataDirs() error {
 // StartGarbageCollection starts garbage collection threads.
 func (kl *Kubelet) StartGarbageCollection() {
 	loggedContainerGCFailure := false
+	// 每分钟执行容器垃圾回收
 	go wait.Until(func() {
 		if err := kl.containerGC.GarbageCollect(); err != nil {
 			klog.Errorf("Container garbage collection failed: %v", err)
@@ -1310,6 +1312,7 @@ func (kl *Kubelet) StartGarbageCollection() {
 		return
 	}
 
+	// 每5分钟执行镜像垃圾回收
 	prevImageGCFailed := false
 	go wait.Until(func() {
 		if err := kl.imageManager.GarbageCollect(); err != nil {
@@ -1346,6 +1349,7 @@ func (kl *Kubelet) initializeModules() error {
 	servermetrics.Register()
 
 	// Setup filesystem directories.
+	// 创建/var/lib/kubelet/{device-plugins,plugins,...}
 	if err := kl.setupDataDirs(); err != nil {
 		return err
 	}
@@ -1378,6 +1382,7 @@ func (kl *Kubelet) initializeModules() error {
 
 // initializeRuntimeDependentModules will initialize internal modules that require the container runtime to be up.
 func (kl *Kubelet) initializeRuntimeDependentModules() {
+	// 1.启动cAdvisor
 	if err := kl.cadvisor.Start(); err != nil {
 		// Fail kubelet and rely on the babysitter to retry starting kubelet.
 		// TODO(random-liu): Add backoff logic in the babysitter
@@ -1387,7 +1392,9 @@ func (kl *Kubelet) initializeRuntimeDependentModules() {
 	// trigger on-demand stats collection once so that we have capacity information for ephemeral storage.
 	// ignore any errors, since if stats collection is not successful, the container manager will fail to start below.
 	kl.StatsProvider.GetCgroupStats("/", true)
+
 	// Start container manager.
+	// 2.启动container manager
 	node, err := kl.getNodeAnyWay()
 	if err != nil {
 		// Fail kubelet and rely on the babysitter to retry starting kubelet.
@@ -1398,17 +1405,23 @@ func (kl *Kubelet) initializeRuntimeDependentModules() {
 		// Fail kubelet and rely on the babysitter to retry starting kubelet.
 		klog.Fatalf("Failed to start ContainerManager %v", err)
 	}
+
+	// 3.启动eviction manager
 	// eviction manager must start after cadvisor because it needs to know if the container runtime has a dedicated imagefs
 	kl.evictionManager.Start(kl.StatsProvider, kl.GetActivePods, kl.podResourcesAreReclaimed, evictionMonitoringPeriod)
 
 	// container log manager must start after container runtime is up to retrieve information from container runtime
 	// and inform container to reopen log file after log rotation.
+
+	// 4.启动container log manager
 	kl.containerLogManager.Start()
 	// Adding Registration Callback function for CSI Driver
 	kl.pluginManager.AddHandler(pluginwatcherapi.CSIPlugin, plugincache.PluginHandler(csi.PluginHandler))
 	// Adding Registration Callback function for Device Manager
 	kl.pluginManager.AddHandler(pluginwatcherapi.DevicePlugin, kl.containerManager.GetPluginRegistrationHandler())
 	// Start the plugin manager
+
+	// 5.启动plugin manager
 	klog.V(4).Infof("starting plugin manager")
 	go kl.pluginManager.Run(kl.sourcesReady, wait.NeverStop)
 }
@@ -1427,6 +1440,7 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 		go kl.cloudResourceSyncManager.Run(wait.NeverStop)
 	}
 
+
 	if err := kl.initializeModules(); err != nil {
 		kl.recorder.Eventf(kl.nodeRef, v1.EventTypeWarning, events.KubeletSetupFailed, err.Error())
 		klog.Fatal(err)
@@ -1438,6 +1452,9 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 	if kl.kubeClient != nil {
 		// Start syncing node status immediately, this may set up things the runtime needs to run.
 		go wait.Until(kl.syncNodeStatus, kl.nodeStatusUpdateFrequency, wait.NeverStop)
+
+		// 快速上报节点状态（启动时执行，只执行一次）：
+		// 1.
 		go kl.fastStatusUpdateOnce()
 
 		// start syncing lease
@@ -2196,6 +2213,7 @@ func (kl *Kubelet) updateRuntimeUp() {
 	kl.updateRuntimeMux.Lock()
 	defer kl.updateRuntimeMux.Unlock()
 
+	// GRPC调用，获取运行时状态
 	s, err := kl.containerRuntime.Status()
 	if err != nil {
 		klog.Errorf("Container runtime sanity check failed: %v", err)
@@ -2205,6 +2223,9 @@ func (kl *Kubelet) updateRuntimeUp() {
 		klog.Errorf("Container runtime status is nil")
 		return
 	}
+
+	// 1.设置运行时状态
+
 	// Periodically log the whole runtime status for debugging.
 	// TODO(random-liu): Consider to send node event when optional
 	// condition is unmet.
@@ -2226,7 +2247,9 @@ func (kl *Kubelet) updateRuntimeUp() {
 		kl.runtimeState.setRuntimeState(err)
 		return
 	}
+
 	kl.runtimeState.setRuntimeState(nil)
+	// 2.初始化运行时依赖模块
 	kl.oneTimeInitializer.Do(kl.initializeRuntimeDependentModules)
 	kl.runtimeState.setRuntimeSync(kl.clock.Now())
 }
@@ -2286,6 +2309,23 @@ func (kl *Kubelet) cleanUpContainersInPod(podID types.UID, exitedContainerID str
 // a runtime update and a node status update. Function returns after one successful node status update.
 // Function is executed only during Kubelet start which improves latency to ready node by updating
 // pod CIDR, runtime status and node statuses ASAP.
+/*
+	fastStatusUpdateOnce函数启动一个循环，当CIDR被应用时（node.spec.podCIDRs非空且合法），
+	kubelet进程将检查内部节点索引器缓存（node indexer cache），并尝试立即更新pod CIDR。
+
+	在pod CIDR被更新之后，它触发一个运行时更新（updateRuntimeUp）和一个节点状态更新（syncNodeStatus）。
+
+	fastStatusUpdateOnce函数只在kubelet启动期间执行，通过更新`pod CIDR`、运行时状态和节点状态的方式，降低节点`Ready`状态的延迟。
+
+
+	上面提到的`node.spec.podCIDRs`(kubectl get node node1 -o yaml)表示当前节点上的Pod可使用的IP范围
+
+	当node.spec.podCIDRs=10.233.64.0/24，那么pod可使用的ip范围为:
+	- 起始IP：10.233.64.0
+	- 结束IP：10.233.64.255
+	- 子网掩码：255.255.255.0
+	- 子网数量：256
+ */
 func (kl *Kubelet) fastStatusUpdateOnce() {
 	for {
 		time.Sleep(100 * time.Millisecond)
@@ -2295,6 +2335,7 @@ func (kl *Kubelet) fastStatusUpdateOnce() {
 			continue
 		}
 		if len(node.Spec.PodCIDRs) != 0 {
+			// [10.233.64.0/24] -> 10.233.64.0/24
 			podCIDRs := strings.Join(node.Spec.PodCIDRs, ",")
 			if _, err := kl.updatePodCIDR(podCIDRs); err != nil {
 				klog.Errorf("Pod CIDR update to %v failed %v", podCIDRs, err)

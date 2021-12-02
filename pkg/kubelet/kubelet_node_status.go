@@ -445,6 +445,7 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 
 	now := kl.clock.Now()
 	if now.Before(kl.lastStatusReportTime.Add(kl.nodeStatusReportFrequency)) {
+		// podCIDR未变 && node节点状态未变
 		if !podCIDRChanged && !nodeStatusHasChanged(&originalNode.Status, &node.Status) {
 			// We must mark the volumes as ReportedInUse in volume manager's dsw even
 			// if no changes were made to the node status (no volumes were added or removed

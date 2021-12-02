@@ -147,6 +147,7 @@ func makeMounts(pod *v1.Pod, podDir string, container *v1.Container, hostName, h
 	for i, mount := range container.VolumeMounts {
 		// do not mount /etc/hosts if container is already mounting on the path
 		mountEtcHostsFile = mountEtcHostsFile && (mount.MountPath != etcHostsPath)
+		// 判断pod下卷组是否含有容器所定义的卷
 		vol, ok := podVolumes[mount.Name]
 		if !ok || vol.Mounter == nil {
 			klog.Errorf("Mount cannot be satisfied for container %q, because the volume is missing (ok=%v) or the volume mounter (vol.Mounter) is nil (vol=%+v): %+v", container.Name, ok, vol, mount)
@@ -218,6 +219,7 @@ func makeMounts(pod *v1.Pod, podDir string, container *v1.Container, hostName, h
 					return nil, cleanupAction, fmt.Errorf("failed to create subPath directory for volumeMount %q of container %q", mount.Name, container.Name)
 				}
 			}
+			// TODO
 			hostPath, cleanupAction, err = subpather.PrepareSafeSubpath(subpath.Subpath{
 				VolumeMountIndex: i,
 				Path:             hostPath,
@@ -261,6 +263,8 @@ func makeMounts(pod *v1.Pod, podDir string, container *v1.Container, hostName, h
 			Propagation:    propagation,
 		})
 	}
+
+
 	if mountEtcHostsFile {
 		hostAliases := pod.Spec.HostAliases
 		hostsMount, err := makeHostsMount(podDir, podIPs, hostName, hostDomain, hostAliases, pod.Spec.HostNetwork)
@@ -324,6 +328,7 @@ func ensureHostsFile(fileName string, hostIPs []string, hostName, hostDomainName
 	var hostsFileContent []byte
 	var err error
 
+	// 使用宿主机网络命名空间
 	if useHostNetwork {
 		// if Pod is using host network, read hosts file from the node's filesystem.
 		// `etcHostsPath` references the location of the hosts file on the node.

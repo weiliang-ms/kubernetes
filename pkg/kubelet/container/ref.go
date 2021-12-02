@@ -35,6 +35,7 @@ var ImplicitContainerPrefix string = "implicitly required container "
 // This function will return an error if the provided Pod does not have a selfLink,
 // but we expect selfLink to be populated at all call sites for the function.
 func GenerateContainerRef(pod *v1.Pod, container *v1.Container) (*v1.ObjectReference, error) {
+	// 返回容器域信息：如第1个initContainer、第2个container
 	fieldPath, err := fieldPath(pod, container)
 	if err != nil {
 		// TODO: figure out intelligent way to refer to containers that we implicitly

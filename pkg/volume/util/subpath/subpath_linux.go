@@ -69,6 +69,8 @@ func (sp *subpath) SafeMakeDir(subdir string, base string, perm os.FileMode) err
 }
 
 func (sp *subpath) PrepareSafeSubpath(subPath Subpath) (newHostPath string, cleanupAction func(), err error) {
+
+	//
 	newHostPath, err = doBindSubPath(sp.mounter, subPath)
 
 	// There is no action when the container starts. Bind-mount will be cleaned
