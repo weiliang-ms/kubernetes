@@ -94,10 +94,18 @@ func checkIfStartOfOomMessages(line string) bool {
 // OOM events that are found in the logs.
 // It will block and should be called from a goroutine.
 func (self *OomParser) StreamOoms(outStream chan<- *OomInstance) {
+	// 通道内写入/dev/kmsg内解析的数据：、序列号、时间戳、信息。如：
+	// - 优先级: 6
+	// - 序列号: 4029
+	// - 时间戳: 2021308979
+	// - 信息:  [  pid  ]   uid  tgid total_vm      rss pgtables_bytes swapents oom_score_adj name
+	// 6,4029,2021308979,-;[  pid  ]   uid  tgid total_vm      rss pgtables_bytes swapents oom_score_adj name
 	kmsgEntries := self.parser.Parse()
 	defer self.parser.Close()
 
 	for msg := range kmsgEntries {
+		// 正则查找oom进程实例，正则规则为：包含`invoked oom-killer:`字符串
+		// 4,3994,2021308860,-;java invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=999
 		in_oom_kernel_log := checkIfStartOfOomMessages(msg.Message)
 		if in_oom_kernel_log {
 			oomCurrentInstance := &OomInstance{
@@ -106,10 +114,13 @@ func (self *OomParser) StreamOoms(outStream chan<- *OomInstance) {
 				TimeOfDeath:         msg.Timestamp,
 			}
 			for msg := range kmsgEntries {
+				// 获取容器名称(docker下貌似为空)
 				err := getContainerName(msg.Message, oomCurrentInstance)
 				if err != nil {
 					klog.Errorf("%v", err)
 				}
+				// 获取进程id
+				// 3,13796,359453210036,-;Memory cgroup out of memory: Killed process 61746 (nginx) total-vm:10668kB, anon-rss:892kB, file-rss:12kB, shmem-rss:0kB, UID:0 pgtables:56kB oom_score_adj:999
 				finished, err := getProcessNamePid(msg.Message, oomCurrentInstance)
 				if err != nil {
 					klog.Errorf("%v", err)
@@ -128,6 +139,8 @@ func (self *OomParser) StreamOoms(outStream chan<- *OomInstance) {
 
 // initializes an OomParser object. Returns an OomParser object and an error.
 func New() (*OomParser, error) {
+	// cat /dev/kmsg |grep oom
+	// 内核缓冲区
 	parser, err := kmsgparser.NewParser()
 	if err != nil {
 		return nil, err

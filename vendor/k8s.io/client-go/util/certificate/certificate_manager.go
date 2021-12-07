@@ -282,15 +282,22 @@ func (m *manager) Start() {
 	klog.V(2).Infof("Certificate rotation is enabled.")
 
 	templateChanged := make(chan struct{})
+	// 每秒循环执行
 	go wait.Until(func() {
+		// 获取证书轮换时间点
 		deadline := m.nextRotationDeadline()
+		// 未到达轮换时间点
 		if sleepInterval := deadline.Sub(m.now()); sleepInterval > 0 {
 			klog.V(2).Infof("Waiting %v for next certificate rotation", sleepInterval)
 
+			// 挂起到轮换时间点
 			timer := time.NewTimer(sleepInterval)
 			defer timer.Stop()
 
+			// 阻塞到证书轮换时间点，时间节点为过期时间的70%-90%之间
+			// 如：证书有效期为10天，那么轮换时间点为第7天与第9天任意时间点
 			select {
+			// 定时器结束逻辑
 			case <-timer.C:
 				// unblock when deadline expires
 			case <-templateChanged:
@@ -314,6 +321,8 @@ func (m *manager) Start() {
 			Jitter:   0.1,
 			Steps:    5,
 		}
+		
+		// 
 		if err := wait.ExponentialBackoff(backoff, m.rotateCerts); err != nil {
 			utilruntime.HandleError(fmt.Errorf("Reached backoff limit, still unable to rotate certs: %v", err))
 			wait.PollInfinite(32*time.Second, m.rotateCerts)
@@ -408,6 +417,9 @@ func (m *manager) RotateCerts() (bool, error) {
 func (m *manager) rotateCerts() (bool, error) {
 	klog.V(2).Infof("Rotating certificates")
 
+	// 生成CSR，即证书签名申请（Certificate Signing Request）
+	// 获取 SSL 证书，需要先生成 CSR 文件并提交给证书颁发机构（CA）。
+	// CSR 包含了公钥和标识名称（Distinguished Name），通常从 Web 服务器生成 CSR，同时创建加解密的公钥私钥对。
 	template, csrPEM, keyPEM, privateKey, err := m.generateCSR()
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("Unable to generate a certificate signing request: %v", err))
@@ -548,6 +560,7 @@ func (m *manager) nextRotationDeadline() time.Time {
 
 	notAfter := m.cert.Leaf.NotAfter
 	totalDuration := float64(notAfter.Sub(m.cert.Leaf.NotBefore))
+	// jitteryDuration(totalDuration) -> 70% - 90%
 	deadline := m.cert.Leaf.NotBefore.Add(jitteryDuration(totalDuration))
 
 	klog.V(2).Infof("Certificate expiration is %v, rotation deadline is %v", notAfter, deadline)

@@ -66,8 +66,26 @@ const (
 // Start watches for system oom's and records an event for every system oom encountered.
 func (ow *realWatcher) Start(ref *v1.ObjectReference) error {
 	outStream := make(chan *oomparser.OomInstance, 10)
+
+	// cAdvisor模块 从/dev/kmsg读取数据解析出oom容器信息：宿主机pid、时间戳、容器名称、容器内进程名称
 	go ow.oomStreamer.StreamOoms(outStream)
 
+	// 解析信息，记录到node event内
+	// 通过kubectl describe node <node-name>查看
+	/*
+		Events:
+	  Type     Reason     Age    From            Message
+	  ----     ------     ----   ----            -------
+	  Warning  SystemOOM  13m    kubelet, node1  System OOM encountered, victim process: nginx, pid: 60867
+	  Warning  SystemOOM  13m    kubelet, node1  System OOM encountered, victim process: nginx, pid: 61438
+	  Warning  SystemOOM  13m    kubelet, node1  System OOM encountered, victim process: nginx, pid: 61746
+	  Warning  SystemOOM  12m    kubelet, node1  System OOM encountered, victim process: runc:[2:INIT], pid: 71899
+	  Warning  SystemOOM  12m    kubelet, node1  System OOM encountered, victim process: nginx, pid: 82162
+	  Warning  SystemOOM  11m    kubelet, node1  System OOM encountered, victim process: nginx, pid: 96195
+	  Warning  SystemOOM  10m    kubelet, node1  System OOM encountered, victim process: runc:[2:INIT], pid: 12707
+	  Warning  SystemOOM  7m33s  kubelet, node1  System OOM encountered, victim process: nginx, pid: 87657
+	  Warning  SystemOOM  2m32s  kubelet, node1  System OOM encountered, victim process: runc:[2:INIT], pid: 98756
+	*/
 	go func() {
 		defer runtime.HandleCrash()
 

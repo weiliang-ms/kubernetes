@@ -551,6 +551,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 
 	containerRefManager := kubecontainer.NewRefManager()
 
+	// 初始化oomWatcher
 	oomWatcher, err := oomwatcher.NewWatcher(kubeDeps.Recorder)
 	if err != nil {
 		return nil, err
@@ -682,6 +683,8 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 
 	klet.statusManager = status.NewManager(klet.kubeClient, klet.podManager, klet)
 
+	// 初始化资源分析器
+	// --volume-stats-agg-period: 指定kubelet计算和缓存所有pod和卷的磁盘使用情况的间隔，默认1min。
 	klet.resourceAnalyzer = serverstats.NewResourceAnalyzer(klet, kubeCfg.VolumeStatsAggPeriod.Duration)
 
 	klet.dockerLegacyService = kubeDeps.dockerLegacyService
@@ -1362,6 +1365,7 @@ func (kl *Kubelet) initializeModules() error {
 	}
 
 	// Start the image manager.
+	// 启动镜像gc管理器协程（每5分钟GC）
 	kl.imageManager.Start()
 
 	// Start the certificate manager if it was enabled.
@@ -1370,6 +1374,7 @@ func (kl *Kubelet) initializeModules() error {
 	}
 
 	// Start out of memory watcher.
+	// 系统OOM的监听器，将会与cadvisor模块之间建立SystemOOM,通过Watch方式从cadvisor那里收到的OOM信号，并发生相关事件；
 	if err := kl.oomWatcher.Start(kl.nodeRef); err != nil {
 		return fmt.Errorf("failed to start OOM watcher %v", err)
 	}
@@ -1435,29 +1440,42 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 		klog.Warning("No api server defined - no node status update will be sent.")
 	}
 
-	// Start the cloud provider sync manager
+	// 1.Start the cloud provider sync manager
 	if kl.cloudResourceSyncManager != nil {
 		go kl.cloudResourceSyncManager.Run(wait.NeverStop)
 	}
 
-
+	// 2.初始化不依赖容器运行时模块
+	/*
+		- image gc manager
+		- certificate manager
+		- oomWatcher
+		- resource analyzer
+	 */
 	if err := kl.initializeModules(); err != nil {
 		kl.recorder.Eventf(kl.nodeRef, v1.EventTypeWarning, events.KubeletSetupFailed, err.Error())
 		klog.Fatal(err)
 	}
 
-	// Start volume manager
+	// 3.Start volume manager
 	go kl.volumeManager.Run(kl.sourcesReady, wait.NeverStop)
 
+	// 4.node status、node lease
 	if kl.kubeClient != nil {
 		// Start syncing node status immediately, this may set up things the runtime needs to run.
+		// 每10s更新节点状态
 		go wait.Until(kl.syncNodeStatus, kl.nodeStatusUpdateFrequency, wait.NeverStop)
 
 		// 快速上报节点状态（启动时执行，只执行一次）：
-		// 1.
 		go kl.fastStatusUpdateOnce()
 
 		// start syncing lease
+		/*
+			kubelet会每10秒（默认更新间隔时间）创建并更新其 Lease 对象。
+			更新内容主要为`Lease.spec.renewTime`字段。
+			Lease 更新独立于 NodeStatus 更新而发生。
+			如果Lease的更新操作失败，kubelet 会采用指数回退机制，从 200 毫秒开始 重试，最长重试间隔为 7 秒钟。
+		 */
 		go kl.nodeLeaseController.Run(wait.NeverStop)
 	}
 	go wait.Until(kl.updateRuntimeUp, 5*time.Second, wait.NeverStop)

@@ -102,6 +102,7 @@ func NewKubeletServerCertificateManager(kubeClient clientset.Interface, kubeCfg 
 		}
 	}
 
+	// 初始化证书管理器
 	m, err := certificate.NewManager(&certificate.Config{
 		ClientFn: func(current *tls.Certificate) (certificatesclient.CertificateSigningRequestInterface, error) {
 			return certSigningRequestClient, nil

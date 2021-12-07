@@ -418,6 +418,7 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 	// If it result in a conflict, all retries are served directly from etcd.
 	opts := metav1.GetOptions{}
 	if tryNumber == 0 {
+		// 从apiserver缓存中获取数据，而非通过apiserver去查询etcd内数据
 		util.FromApiserverCache(&opts)
 	}
 	node, err := kl.heartbeatClient.CoreV1().Nodes().Get(context.TODO(), string(kl.nodeName), opts)
@@ -444,6 +445,13 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 	kl.setNodeStatus(node)
 
 	now := kl.clock.Now()
+
+	// e.g.
+	// lastStatusReportTime: 2021-12-03 13:44:00
+	// nextStatusReportTime: 2021-12-03 13:44:10
+	// now: 2021-12-03 13:44:05
+
+	// 没有到更新节点状态的时间下（一般第一次启动/重启的时候）走下面逻辑
 	if now.Before(kl.lastStatusReportTime.Add(kl.nodeStatusReportFrequency)) {
 		// podCIDR未变 && node节点状态未变
 		if !podCIDRChanged && !nodeStatusHasChanged(&originalNode.Status, &node.Status) {
@@ -473,6 +481,8 @@ func (kl *Kubelet) tryUpdateNodeStatus(tryNumber int) error {
 	if err != nil {
 		return err
 	}
+
+	// 更新上次上报节点状态的时间为当前时间
 	kl.lastStatusReportTime = now
 	kl.setLastObservedNodeAddresses(updatedNode.Status.Addresses)
 	// If update finishes successfully, mark the volumeInUse as reportedInUse to indicate

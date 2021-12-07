@@ -96,6 +96,7 @@ func (c *controller) sync() {
 		// we can optimistically assume it didn't change since our last update and try updating
 		// based on the version from that time. Thanks to it we avoid GET call and reduce load
 		// on etcd and kube-apiserver.
+
 		// If at some point other agents will also be frequently updating the Lease object, this
 		// can result in performance degradation, because we will end up with calling additional
 		// GET/PUT - at this point this whole "if" should be removed.

@@ -175,12 +175,16 @@ func NewImageGCManager(runtime container.Runtime, statsProvider StatsProvider, r
 }
 
 func (im *realImageGCManager) Start() {
+
+	// 每5分钟执行：
+	//
 	go wait.Until(func() {
 		// Initial detection make detected time "unknown" in the past.
 		var ts time.Time
 		if im.initialized {
 			ts = time.Now()
 		}
+		// 仅为了测试是否可以监控到节点镜像
 		_, err := im.detectImages(ts)
 		if err != nil {
 			klog.Warningf("[imageGCManager] Failed to monitor images: %v", err)
@@ -207,24 +211,31 @@ func (im *realImageGCManager) GetImageList() ([]container.Image, error) {
 	return im.imageCache.get(), nil
 }
 
+// 获取节点当前已用镜像列表
 func (im *realImageGCManager) detectImages(detectTime time.Time) (sets.String, error) {
 	imagesInUse := sets.NewString()
 
 	// Always consider the container runtime pod sandbox image in use
+	// 容器沙箱镜像（）不在回收列表
+	// 获取容器沙箱镜像引用（镜像摘要或id），添加至使用中的镜像列表
 	imageRef, err := im.runtime.GetImageRef(container.ImageSpec{Image: im.sandboxImage})
 	if err == nil && imageRef != "" {
 		imagesInUse.Insert(imageRef)
 	}
 
+	// 获取当前节点全部镜像
 	images, err := im.runtime.ListImages()
 	if err != nil {
 		return imagesInUse, err
 	}
+
+	// 获取当前节点全部pod（包括退出、死亡状态的pod）
 	pods, err := im.runtime.GetPods(true)
 	if err != nil {
 		return imagesInUse, err
 	}
 
+	// 遍历pod的容器镜像添加
 	// Make a set of images in use by containers.
 	for _, pod := range pods {
 		for _, container := range pod.Containers {
@@ -243,6 +254,7 @@ func (im *realImageGCManager) detectImages(detectTime time.Time) (sets.String, e
 		currentImages.Insert(image.ID)
 
 		// New image, set it as detected now.
+		// 判断镜像记录表里是否存在，没有的话添加至表里，并设置firstDetected
 		if _, ok := im.imageRecords[image.ID]; !ok {
 			klog.V(5).Infof("Image ID %s is new", image.ID)
 			im.imageRecords[image.ID] = &imageRecord{
@@ -251,6 +263,7 @@ func (im *realImageGCManager) detectImages(detectTime time.Time) (sets.String, e
 		}
 
 		// Set last used time to now if the image is being used.
+		// 如果镜像在被使用，设置lastUsed为当前时间
 		if isImageUsed(image.ID, imagesInUse) {
 			klog.V(5).Infof("Setting Image ID %s lastUsed to %v", image.ID, now)
 			im.imageRecords[image.ID].lastUsed = now
